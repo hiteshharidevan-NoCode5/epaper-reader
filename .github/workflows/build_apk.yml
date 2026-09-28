@@ -26,7 +26,7 @@ jobs:
       - name: Create Base Android Project
         run: flutter create . --project-name=epaper_reader --platforms=android --org=com.example
 
-      - name: Configure Android Project (SDK & Kotlin)
+      - name: Configure Android Project (SDK & Kotlin & PDF Handler)
         run: |
           # Set minSdkVersion to 21
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
@@ -34,6 +34,10 @@ jobs:
           # Update Kotlin version to 1.9.22
           sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
+          
+          # Allow ChromeOS to open PDFs with this app
+          INTENT_FILTER='<intent-filter><action android:name="android.intent.action.VIEW"\/><category android:name="android.intent.category.DEFAULT"\/><category android:name="android.intent.category.BROWSABLE"\/><data android:mimeType="application\/pdf"\/><\/intent-filter>'
+          sed -i "s/<\/activity>/$INTENT_FILTER<\/activity>/" android/app/src/main/AndroidManifest.xml
 
       - name: Install Dependencies
         run: flutter pub get
