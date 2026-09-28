@@ -1,8 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 void main() {
@@ -37,12 +36,12 @@ class EPaperViewerScreen extends StatefulWidget {
 class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
   File? _pdfFile;
   String? _pdfFileName;
-  final PdfViewerController _pdfViewerController = PdfViewerController();
+  PDFViewController? _pdfViewController;
   final FlutterTts _tts = FlutterTts();
 
   bool _isPlaying = false;
-  int _currentPage = 1;
-  int _pageCount = 0;
+  int _currentPage = 0;
+  int _totalPages = 0;
   double _speechRate = 0.5;
 
   @override
@@ -74,7 +73,6 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
   @override
   void dispose() {
     _tts.stop();
-    _pdfViewerController.dispose();
     super.dispose();
   }
 
@@ -91,7 +89,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
           _pdfFile = File(result.files.single.path!);
           _pdfFileName = result.files.single.name;
           _isPlaying = false;
-          _currentPage = 1;
+          _currentPage = 0;
         });
       }
     } catch (e) {
@@ -101,45 +99,87 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
     }
   }
 
-  Future<void> _readAloudCurrentPage() async {
-    if (_pdfFile == null) return;
+  void _showListenDialog() {
+    final textController = TextEditingController();
 
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFF7F5F0),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          left: 16,
+          right: 16,
+          top: 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Listen to Article',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Paste or enter the article text from this page to read aloud:',
+              style: TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: textController,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                hintText: 'Paste news report or editorial text here...',
+                border: OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF6B1D1D),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Start Reading Aloud'),
+              onPressed: () async {
+                final txt = textController.text.trim();
+                if (txt.isNotEmpty) {
+                  Navigator.pop(ctx);
+                  await _tts.stop();
+                  setState(() => _isPlaying = true);
+                  await _tts.setSpeechRate(_speechRate);
+                  await _tts.speak(txt);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggleAudio() async {
     if (_isPlaying) {
       await _tts.stop();
       setState(() => _isPlaying = false);
-      return;
-    }
-
-    try {
-      final List<int> bytes = await _pdfFile!.readAsBytes();
-      final PdfDocument document = PdfDocument(inputBytes: bytes);
-
-      int targetIndex = _currentPage - 1;
-      if (targetIndex < 0) targetIndex = 0;
-      if (targetIndex >= document.pages.count) targetIndex = document.pages.count - 1;
-
-      PdfTextExtractor extractor = PdfTextExtractor(document);
-      String text = extractor.extractText(startPageIndex: targetIndex, endPageIndex: targetIndex);
-      document.dispose();
-
-      text = text.trim();
-      if (text.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No selectable text found on this page (it might be a scanned image).'),
-          ),
-        );
-        return;
-      }
-
-      setState(() => _isPlaying = true);
-      await _tts.setSpeechRate(_speechRate);
-      await _tts.speak(text);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error reading text: $e')),
-      );
+    } else {
+      _showListenDialog();
     }
   }
 
@@ -193,22 +233,30 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                 ),
               ),
             )
-          : SfPdfViewer.file(
-              _pdfFile!,
-              controller: _pdfViewerController,
-              canShowScrollHead: true,
-              canShowScrollStatus: true,
-              enableDoubleTapZooming: true,
-              onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+          : PDFView(
+              filePath: _pdfFile!.path,
+              enableSwipe: true,
+              swipeHorizontal: true,
+              autoSpacing: false,
+              pageFling: false,
+              onRender: (pages) {
                 setState(() {
-                  _pageCount = details.document.pages.count;
-                  _currentPage = 1;
+                  _totalPages = pages ?? 0;
                 });
               },
-              onPageChanged: (PdfPageChangedDetails details) {
+              onViewCreated: (PDFViewController vc) {
+                _pdfViewController = vc;
+              },
+              onPageChanged: (page, total) {
                 setState(() {
-                  _currentPage = details.newPageNumber;
+                  _currentPage = page ?? 0;
+                  _totalPages = total ?? 0;
                 });
+              },
+              onError: (error) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('PDF render error: $error')),
+                );
               },
             ),
       bottomNavigationBar: _pdfFile != null
@@ -228,28 +276,26 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                 child: Row(
                   children: [
                     Text(
-                      'Page $_currentPage / $_pageCount',
+                      'Page ${_currentPage + 1} / $_totalPages',
                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                     ),
                     const Spacer(),
-                    // Read Aloud / Stop button
                     FilledButton.icon(
                       style: FilledButton.styleFrom(
                         backgroundColor: _isPlaying ? Colors.red.shade700 : const Color(0xFF6B1D1D),
                       ),
-                      onPressed: _readAloudCurrentPage,
+                      onPressed: _toggleAudio,
                       icon: Icon(_isPlaying ? Icons.stop_rounded : Icons.volume_up_rounded),
-                      label: Text(_isPlaying ? 'Stop' : 'Listen Page'),
+                      label: Text(_isPlaying ? 'Stop' : 'Listen Article'),
                     ),
                     const SizedBox(width: 8),
-                    // Speech Speed Dropdown
                     PopupMenuButton<double>(
                       tooltip: 'Reading Speed',
                       initialValue: _speechRate,
                       child: Padding(
                         padding: const EdgeInsets.all(8.0),
                         child: Text(
-                          '${(_speechRate * 2).toStringAsFixed(2)}x',
+                          '${(_speechRate * 2).toStringAsFixed(1)}x',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -257,11 +303,11 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                         setState(() => _speechRate = val);
                         _tts.setSpeechRate(val);
                       },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(value: 0.35, child: Text('0.7x Slow')),
-                        const PopupMenuItem(value: 0.5, child: Text('1.0x Normal')),
-                        const PopupMenuItem(value: 0.65, child: Text('1.3x Fast')),
-                        const PopupMenuItem(value: 0.8, child: Text('1.6x Very Fast')),
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(value: 0.35, child: Text('0.7x Slow')),
+                        PopupMenuItem(value: 0.5, child: Text('1.0x Normal')),
+                        PopupMenuItem(value: 0.65, child: Text('1.3x Fast')),
+                        PopupMenuItem(value: 0.8, child: Text('1.6x Very Fast')),
                       ],
                     ),
                   ],
