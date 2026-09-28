@@ -26,10 +26,14 @@ jobs:
       - name: Create Base Android Project
         run: flutter create . --project-name=epaper_reader --platforms=android --org=com.example
 
-      - name: Set minSdkVersion to 21
+      - name: Configure Android Project (SDK & Kotlin)
         run: |
+          # Set minSdkVersion to 21
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
+          # Update Kotlin version to 1.9.22
+          sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
+          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
 
       - name: Install Dependencies
         run: flutter pub get
