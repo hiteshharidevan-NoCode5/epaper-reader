@@ -24,7 +24,7 @@ jobs:
           channel: 'stable'
 
       - name: Create Base Android Project
-        run: flutter create . --platforms=android --org=com.example
+        run: flutter create . --project-name=epaper_reader --platforms=android --org=com.example
 
       - name: Install Dependencies
         run: flutter pub get
