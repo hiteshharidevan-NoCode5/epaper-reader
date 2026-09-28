@@ -1,116 +1,49 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 void main() {
-  runApp(const EPaperReaderApp());
+  runApp(const EPaperApp());
 }
 
-class EPaperReaderApp extends StatefulWidget {
-  const EPaperReaderApp({super.key});
-
-  @override
-  State<EPaperReaderApp> createState() => _EPaperReaderAppState();
-}
-
-class _EPaperReaderAppState extends State<EPaperReaderApp> {
-  ThemeMode _themeMode = ThemeMode.light;
-
-  void toggleTheme() {
-    setState(() {
-      _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
-    });
-  }
+class EPaperApp extends StatelessWidget {
+  const EPaperApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'E-Paper Reader',
+      title: 'ePaper Reader',
       debugShowCheckedModeBanner: false,
-      themeMode: _themeMode,
       theme: ThemeData(
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: const Color(0xFFFBF8F1),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFEFE9DA),
-          foregroundColor: Colors.black87,
-          elevation: 0,
-        ),
+        useMaterial3: true,
+        colorSchemeSeed: const Color(0xFF6B1D1D),
+        scaffoldBackgroundColor: const Color(0xFFF7F5F0),
       ),
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF1E1E1E),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF2C2C2C),
-          foregroundColor: Colors.white70,
-          elevation: 0,
-        ),
-      ),
-      home: ReaderHomeScreen(onToggleTheme: toggleTheme),
+      home: const EPaperViewerScreen(),
     );
   }
 }
 
-class NewspaperEdition {
-  final String title;
-  final String date;
-  final List<ArticleItem> articles;
-
-  NewspaperEdition({
-    required this.title,
-    required this.date,
-    required this.articles,
-  });
-}
-
-class ArticleItem {
-  final String headline;
-  final String category;
-  final String bodyText;
-  final double headlineFontSize;
-
-  ArticleItem({
-    required this.headline,
-    required this.category,
-    required this.bodyText,
-    this.headlineFontSize = 26.0,
-  });
-}
-
-class ReaderHomeScreen extends StatefulWidget {
-  final VoidCallback onToggleTheme;
-  const ReaderHomeScreen({super.key, required this.onToggleTheme});
+class EPaperViewerScreen extends StatefulWidget {
+  const EPaperViewerScreen({super.key});
 
   @override
-  State<ReaderHomeScreen> createState() => _ReaderHomeScreenState();
+  State<EPaperViewerScreen> createState() => _EPaperViewerScreenState();
 }
 
-class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
+class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
+  File? _pdfFile;
+  String? _pdfFileName;
+  final PdfViewerController _pdfViewerController = PdfViewerController();
   final FlutterTts _tts = FlutterTts();
-  bool _isPlaying = false;
-  double _fontSize = 18.0;
 
-  final List<NewspaperEdition> _editions = [
-    NewspaperEdition(
-      title: 'Daily Chronicle - Morning Edition',
-      date: 'September 28, 2026',
-      articles: [
-        ArticleItem(
-          headline: 'Clean Energy Grid Reaches New Output Peak Across Region',
-          category: 'INFRASTRUCTURE',
-          headlineFontSize: 28.0,
-          bodyText:
-              'Grid operators recorded historical transmission volumes this morning as regional solar arrays and wind corridors supplied over seventy-eight percent of peak municipal consumption. Regional planners emphasized steady base-load performance alongside continued integration of high-density battery storage nodes.',
-        ),
-        ArticleItem(
-          headline: 'Central Bank Concludes Quarterly Session on Steady Policy',
-          category: 'FINANCE',
-          headlineFontSize: 24.0,
-          bodyText:
-              'Citing balanced employment figures and cooling core inflation, the monetary council decided against rate adjustments for the third straight quarter.',
-        ),
-      ],
-    ),
-  ];
+  bool _isPlaying = false;
+  int _currentPage = 1;
+  int _pageCount = 0;
+  double _speechRate = 0.5;
 
   @override
   void initState() {
@@ -119,168 +52,223 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   }
 
   void _initTts() {
-    _tts.setSpeechRate(0.5);
-    _tts.setPitch(1.0);
-  }
+    _tts.setLanguage("en-US");
+    _tts.setSpeechRate(_speechRate);
 
-  Future<void> _speakText(String text) async {
-    if (_isPlaying) {
-      await _tts.stop();
-      setState(() => _isPlaying = false);
-    } else {
-      setState(() => _isPlaying = true);
-      _tts.setCompletionHandler(() {
-        setState(() => _isPlaying = false);
+    _tts.setCompletionHandler(() {
+      setState(() {
+        _isPlaying = false;
       });
-      await _tts.speak(text);
-    }
+    });
+
+    _tts.setErrorHandler((msg) {
+      setState(() {
+        _isPlaying = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Audio Error: $msg')),
+      );
+    });
   }
 
   @override
   void dispose() {
     _tts.stop();
+    _pdfViewerController.dispose();
     super.dispose();
   }
 
-  void _showAddArticleDialog() {
-    final titleController = TextEditingController();
-    final bodyController = TextEditingController();
+  Future<void> _pickPdfFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add Article / Notes'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                decoration: const InputDecoration(labelText: 'Headline'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: bodyController,
-                maxLines: 6,
-                decoration: const InputDecoration(labelText: 'Body Text / Article Content'),
-              ),
-            ],
+      if (result != null && result.files.single.path != null) {
+        await _tts.stop();
+        setState(() {
+          _pdfFile = File(result.files.single.path!);
+          _pdfFileName = result.files.single.name;
+          _isPlaying = false;
+          _currentPage = 1;
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load file: $e')),
+      );
+    }
+  }
+
+  Future<void> _readAloudCurrentPage() async {
+    if (_pdfFile == null) return;
+
+    if (_isPlaying) {
+      await _tts.stop();
+      setState(() => _isPlaying = false);
+      return;
+    }
+
+    try {
+      final List<int> bytes = await _pdfFile!.readAsBytes();
+      final PdfDocument document = PdfDocument(inputBytes: bytes);
+
+      int targetIndex = _currentPage - 1;
+      if (targetIndex < 0) targetIndex = 0;
+      if (targetIndex >= document.pages.count) targetIndex = document.pages.count - 1;
+
+      PdfTextExtractor extractor = PdfTextExtractor(document);
+      String text = extractor.extractText(startPageIndex: targetIndex, endPageIndex: targetIndex);
+      document.dispose();
+
+      text = text.trim();
+      if (text.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No selectable text found on this page (it might be a scanned image).'),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (titleController.text.isNotEmpty && bodyController.text.isNotEmpty) {
-                setState(() {
-                  _editions.first.articles.insert(
-                    0,
-                    ArticleItem(
-                      headline: titleController.text,
-                      category: 'CUSTOM',
-                      bodyText: bodyController.text,
-                    ),
-                  );
-                });
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
+        );
+        return;
+      }
+
+      setState(() => _isPlaying = true);
+      await _tts.setSpeechRate(_speechRate);
+      await _tts.speak(text);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error reading text: $e')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final edition = _editions.first;
-
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          edition.title,
+          _pdfFileName ?? 'ePaper Reader',
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          overflow: TextOverflow.ellipsis,
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.text_fields),
-            tooltip: 'Increase Font Size',
-            onPressed: () {
-              setState(() {
-                _fontSize = _fontSize >= 26.0 ? 16.0 : _fontSize + 2.0;
-              });
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.brightness_medium),
-            tooltip: 'Toggle Day/Night Mode',
-            onPressed: widget.onToggleTheme,
-          ),
-          IconButton(
-            icon: const Icon(Icons.note_add_outlined),
-            tooltip: 'Add Custom Article',
-            onPressed: _showAddArticleDialog,
+            tooltip: 'Open ePaper PDF',
+            icon: const Icon(Icons.folder_open_rounded),
+            onPressed: _pickPdfFile,
           ),
         ],
       ),
-      body: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        itemCount: edition.articles.length,
-        separatorBuilder: (context, index) => const Divider(thickness: 1.5, height: 32),
-        itemBuilder: (context, index) {
-          final article = edition.articles[index];
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.blueGrey.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  article.category,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                article.headline,
-                style: TextStyle(
-                  fontSize: article.headlineFontSize,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'serif',
-                  height: 1.2,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                article.bodyText,
-                style: TextStyle(
-                  fontSize: _fontSize,
-                  height: 1.6,
-                  fontFamily: 'serif',
+      body: _pdfFile == null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.newspaper_rounded, size: 90, color: Colors.brown.shade300),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'No ePaper loaded',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Select a downloaded newspaper PDF from your files to read or listen.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 14, color: Colors.black54),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _pickPdfFile,
+                      icon: const Icon(Icons.upload_file_rounded),
+                      label: const Text('Open Newspaper PDF', style: TextStyle(fontSize: 16)),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton.icon(
-                    onPressed: () => _speakText('${article.headline}. ${article.bodyText}'),
-                    icon: Icon(_isPlaying ? Icons.stop_circle : Icons.volume_up),
-                    label: Text(_isPlaying ? 'Stop Reading' : 'Listen'),
+            )
+          : SfPdfViewer.file(
+              _pdfFile!,
+              controller: _pdfViewerController,
+              canShowScrollHead: true,
+              canShowScrollStatus: true,
+              enableDoubleTapZooming: true,
+              onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+                setState(() {
+                  _pageCount = details.document.pages.count;
+                  _currentPage = 1;
+                });
+              },
+              onPageChanged: (PdfPageChangedDetails details) {
+                setState(() {
+                  _currentPage = details.newPageNumber;
+                });
+              },
+            ),
+      bottomNavigationBar: _pdfFile != null
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, -2),
                   ),
                 ],
               ),
-            ],
-          );
-        },
-      ),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    Text(
+                      'Page $_currentPage / $_pageCount',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
+                    const Spacer(),
+                    // Read Aloud / Stop button
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _isPlaying ? Colors.red.shade700 : const Color(0xFF6B1D1D),
+                      ),
+                      onPressed: _readAloudCurrentPage,
+                      icon: Icon(_isPlaying ? Icons.stop_rounded : Icons.volume_up_rounded),
+                      label: Text(_isPlaying ? 'Stop' : 'Listen Page'),
+                    ),
+                    const SizedBox(width: 8),
+                    // Speech Speed Dropdown
+                    PopupMenuButton<double>(
+                      tooltip: 'Reading Speed',
+                      initialValue: _speechRate,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          '${(_speechRate * 2).toStringAsFixed(2)}x',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      onSelected: (val) {
+                        setState(() => _speechRate = val);
+                        _tts.setSpeechRate(val);
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(value: 0.35, child: Text('0.7x Slow')),
+                        const PopupMenuItem(value: 0.5, child: Text('1.0x Normal')),
+                        const PopupMenuItem(value: 0.65, child: Text('1.3x Fast')),
+                        const PopupMenuItem(value: 0.8, child: Text('1.6x Very Fast')),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 }
