@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:share_handler/share_handler.dart';
 
 void main() {
   runApp(const EPaperReaderApp());
@@ -139,16 +139,20 @@ class _EPaperHomeScreenState extends State<EPaperHomeScreen> {
     _tts.setPitch(1.0);
   }
 
- void _setupShareIntentListeners() {
-    ReceiveSharingIntent.instance.getMediaStream().listen((sharedFiles) {
-      if (sharedFiles.isNotEmpty) {
-        _handleIncomingFile(sharedFiles.first.path);
+void _setupShareIntentListeners() {
+    final handler = ShareHandlerPlatform.instance;
+
+    // Sharing while app is already running
+    handler.sharedMediaStream.listen((SharedMedia media) {
+      if (media.attachments != null && media.attachments!.isNotEmpty) {
+        _handleIncomingFile(media.attachments!.first.path);
       }
     });
 
-    ReceiveSharingIntent.instance.getInitialMedia().then((sharedFiles) {
-      if (sharedFiles.isNotEmpty) {
-        _handleIncomingFile(sharedFiles.first.path);
+    // Sharing when app was closed
+    handler.getInitialSharedMedia().then((media) {
+      if (media != null && media.attachments != null && media.attachments!.isNotEmpty) {
+        _handleIncomingFile(media.attachments!.first.path);
       }
     });
   }
