@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_tts: ^4.2.0
-  share_handler: ^0.0.19
 
 dev_dependencies:
   flutter_test:
