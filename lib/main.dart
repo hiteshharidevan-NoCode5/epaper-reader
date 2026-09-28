@@ -40,11 +40,13 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
   PDFViewController? _pdfViewController;
   final FlutterTts _tts = FlutterTts();
   final FocusNode _focusNode = FocusNode();
+  final TransformationController _transformController = TransformationController();
 
   bool _isPlaying = false;
   int _currentPage = 0;
   int _totalPages = 0;
   double _speechRate = 0.5;
+  double _verticalOffset = 0.0;
 
   @override
   void initState() {
@@ -76,6 +78,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
   void dispose() {
     _tts.stop();
     _focusNode.dispose();
+    _transformController.dispose();
     super.dispose();
   }
 
@@ -93,8 +96,9 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
           _pdfFileName = result.files.single.name;
           _isPlaying = false;
           _currentPage = 0;
+          _verticalOffset = 0.0;
         });
-        // Request keyboard focus for arrow navigation
+        _resetVerticalScroll();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _focusNode.requestFocus();
         });
@@ -106,29 +110,51 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
     }
   }
 
+  void _resetVerticalScroll() {
+    _verticalOffset = 0.0;
+    _transformController.value = Matrix4.identity();
+  }
+
+  void _scrollVertical(double delta) {
+    setState(() {
+      _verticalOffset = (_verticalOffset + delta).clamp(-1200.0, 0.0);
+      _transformController.value = Matrix4.identity()..translate(0.0, _verticalOffset);
+    });
+  }
+
   void _nextPage() {
     if (_pdfViewController != null && _currentPage < _totalPages - 1) {
+      _resetVerticalScroll();
       _pdfViewController!.setPage(_currentPage + 1);
     }
   }
 
   void _previousPage() {
     if (_pdfViewController != null && _currentPage > 0) {
+      _resetVerticalScroll();
       _pdfViewController!.setPage(_currentPage - 1);
     }
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent) {
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      // Left and Right arrows turn pages
       if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
-          event.logicalKey == LogicalKeyboardKey.arrowDown ||
           event.logicalKey == LogicalKeyboardKey.pageDown) {
         _nextPage();
         return KeyEventResult.handled;
       } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-          event.logicalKey == LogicalKeyboardKey.arrowUp ||
           event.logicalKey == LogicalKeyboardKey.pageUp) {
         _previousPage();
+        return KeyEventResult.handled;
+      }
+      
+      // Up and Down arrows scroll vertically within the current page
+      else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _scrollVertical(-120.0); // scroll down content
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _scrollVertical(120.0); // scroll up content
         return KeyEventResult.handled;
       }
     }
@@ -234,12 +260,12 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
           ),
           actions: [
             IconButton(
-              tooltip: 'Previous Page (Left Arrow)',
+              tooltip: 'Previous Page (←)',
               icon: const Icon(Icons.chevron_left_rounded),
               onPressed: _currentPage > 0 ? _previousPage : null,
             ),
             IconButton(
-              tooltip: 'Next Page (Right Arrow)',
+              tooltip: 'Next Page (→)',
               icon: const Icon(Icons.chevron_right_rounded),
               onPressed: _currentPage < _totalPages - 1 ? _nextPage : null,
             ),
@@ -285,32 +311,40 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
               )
             : GestureDetector(
                 onTap: () => _focusNode.requestFocus(),
-                child: PDFView(
-                  filePath: _pdfFile!.path,
-                  enableSwipe: true,
-                  swipeHorizontal: true,
-                  autoSpacing: false,
-                  pageFling: false,
-                  onRender: (pages) {
-                    setState(() {
-                      _totalPages = pages ?? 0;
-                    });
-                  },
-                  onViewCreated: (PDFViewController vc) {
-                    _pdfViewController = vc;
-                    _focusNode.requestFocus();
-                  },
-                  onPageChanged: (page, total) {
-                    setState(() {
-                      _currentPage = page ?? 0;
-                      _totalPages = total ?? 0;
-                    });
-                  },
-                  onError: (error) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('PDF render error: $error')),
-                    );
-                  },
+                child: ClipRect(
+                  child: InteractiveViewer(
+                    transformationController: _transformController,
+                    panEnabled: false,
+                    scaleEnabled: false,
+                    child: PDFView(
+                      filePath: _pdfFile!.path,
+                      enableSwipe: true,
+                      swipeHorizontal: true,
+                      autoSpacing: false,
+                      pageFling: false,
+                      onRender: (pages) {
+                        setState(() {
+                          _totalPages = pages ?? 0;
+                        });
+                      },
+                      onViewCreated: (PDFViewController vc) {
+                        _pdfViewController = vc;
+                        _focusNode.requestFocus();
+                      },
+                      onPageChanged: (page, total) {
+                        setState(() {
+                          _currentPage = page ?? 0;
+                          _totalPages = total ?? 0;
+                        });
+                        _resetVerticalScroll();
+                      },
+                      onError: (error) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('PDF render error: $error')),
+                        );
+                      },
+                    ),
+                  ),
                 ),
               ),
         bottomNavigationBar: _pdfFile != null
@@ -333,10 +367,10 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                         'Page ${_currentPage + 1} / $_totalPages',
                         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 12),
                       const Text(
-                        '(Use ← / → keys)',
-                        style: TextStyle(fontSize: 11, color: Colors.black45),
+                        '↑↓: Scroll  |  ←→: Turn Page',
+                        style: TextStyle(fontSize: 11, color: Colors.black54),
                       ),
                       const Spacer(),
                       FilledButton.icon(
