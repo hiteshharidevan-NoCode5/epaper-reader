@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_tts: ^4.2.0
-  receive_sharing_intent: ^2.0.0
+  receive_sharing_intent: ^1.8.1
 
 dev_dependencies:
   flutter_test:
