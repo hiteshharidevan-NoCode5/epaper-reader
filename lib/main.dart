@@ -140,13 +140,15 @@ class _EPaperHomeScreenState extends State<EPaperHomeScreen> {
   }
 
   void _setupShareIntentListeners() {
-    ReceiveSharingIntent.instance.getMediaStream().listen((sharedFiles) {
+    // 1. For sharing while the app is running in memory
+    ReceiveSharingIntent.getMediaStream().listen((sharedFiles) {
       if (sharedFiles.isNotEmpty) {
         _handleIncomingFile(sharedFiles.first.path);
       }
     });
 
-    ReceiveSharingIntent.instance.getInitialMedia().then((sharedFiles) {
+    // 2. For sharing when the app was closed
+    ReceiveSharingIntent.getInitialMedia().then((sharedFiles) {
       if (sharedFiles.isNotEmpty) {
         _handleIncomingFile(sharedFiles.first.path);
       }
