@@ -40,11 +40,14 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
   PDFViewController? _pdfViewController;
   final FlutterTts _tts = FlutterTts();
   final FocusNode _focusNode = FocusNode();
+  final TransformationController _transformController = TransformationController();
 
   bool _isPlaying = false;
   int _currentPage = 0;
   int _totalPages = 0;
   double _speechRate = 0.5;
+  double _currentOffsetY = 0.0;
+  double _maxOffsetY = 0.0;
 
   @override
   void initState() {
@@ -76,6 +79,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
   void dispose() {
     _tts.stop();
     _focusNode.dispose();
+    _transformController.dispose();
     super.dispose();
   }
 
@@ -94,6 +98,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
           _isPlaying = false;
           _currentPage = 0;
         });
+        _resetVerticalPan();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _focusNode.requestFocus();
         });
@@ -117,14 +122,29 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
     });
   }
 
+  void _resetVerticalPan() {
+    _currentOffsetY = 0.0;
+    _transformController.value = Matrix4.identity();
+  }
+
+  void _panVertically(double step) {
+    if (_maxOffsetY <= 0) return;
+    setState(() {
+      _currentOffsetY = (_currentOffsetY + step).clamp(-_maxOffsetY, 0.0);
+      _transformController.value = Matrix4.identity()..translate(0.0, _currentOffsetY);
+    });
+  }
+
   void _nextPage() {
     if (_pdfViewController != null && _currentPage < _totalPages - 1) {
+      _resetVerticalPan();
       _pdfViewController!.setPage(_currentPage + 1);
     }
   }
 
   void _previousPage() {
     if (_pdfViewController != null && _currentPage > 0) {
+      _resetVerticalPan();
       _pdfViewController!.setPage(_currentPage - 1);
     }
   }
@@ -134,13 +154,13 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
       final isControlOrMeta = HardwareKeyboard.instance.isControlPressed ||
           HardwareKeyboard.instance.isMetaPressed;
 
-      // Shortcut: Ctrl + O -> Open file
+      // Ctrl + O: Open file
       if (isControlOrMeta && event.logicalKey == LogicalKeyboardKey.keyO) {
         _pickPdfFile();
         return KeyEventResult.handled;
       }
 
-      // Shortcut: Ctrl + W or Escape -> Close current ePaper
+      // Ctrl + W or Escape: Close file
       if ((isControlOrMeta && event.logicalKey == LogicalKeyboardKey.keyW) ||
           event.logicalKey == LogicalKeyboardKey.escape) {
         if (_pdfFile != null) {
@@ -149,7 +169,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
         }
       }
 
-      // Left / Right / PageUp / PageDown -> Turn whole pages
+      // Left / Right / PageUp / PageDown: Turn pages
       if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
           event.logicalKey == LogicalKeyboardKey.pageDown) {
         _nextPage();
@@ -157,6 +177,15 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
       } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
           event.logicalKey == LogicalKeyboardKey.pageUp) {
         _previousPage();
+        return KeyEventResult.handled;
+      }
+
+      // Up / Down: Pan up and down on the current page
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _panVertically(-150.0);
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _panVertically(150.0);
         return KeyEventResult.handled;
       }
     }
@@ -273,7 +302,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                 onPressed: _currentPage < _totalPages - 1 ? _nextPage : null,
               ),
               IconButton(
-                tooltip: 'Close ePaper (Ctrl+W or Esc)',
+                tooltip: 'Close ePaper (Ctrl+W / Esc)',
                 icon: const Icon(Icons.close_rounded),
                 onPressed: _closeCurrentPdf,
               ),
@@ -300,7 +329,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Press Ctrl + O or click below to select an ePaper PDF.\nUse Esc or Ctrl + W to close.',
+                        'Press Ctrl + O or click below to open a newspaper PDF.\nUse Esc or Ctrl + W to close.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: Colors.black54),
                       ),
@@ -318,40 +347,63 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                   ),
                 ),
               )
-            : GestureDetector(
-                onTap: () => _focusNode.requestFocus(),
-                child: PDFView(
-                  filePath: _pdfFile!.path,
-                  // Vertical scrolling for natural top-to-bottom reading with Up/Down arrows
-                  swipeHorizontal: false,
-                  enableSwipe: true,
-                  autoSpacing: true,
-                  pageFling: false,
-                  pageSnap: false,
-                  fitPolicy: FitPolicy.WIDTH,
-                  // Blocks Telegram links and web ad redirections
-                  preventLinkNavigation: true,
-                  onRender: (pages) {
-                    setState(() {
-                      _totalPages = pages ?? 0;
-                    });
-                  },
-                  onViewCreated: (PDFViewController vc) {
-                    _pdfViewController = vc;
-                    _focusNode.requestFocus();
-                  },
-                  onPageChanged: (page, total) {
-                    setState(() {
-                      _currentPage = page ?? 0;
-                      _totalPages = total ?? 0;
-                    });
-                  },
-                  onError: (error) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('PDF render error: $error')),
-                    );
-                  },
-                ),
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  // A full broadsheet newspaper rendered across Chromebook width
+                  // typically has a ~1.4 to 1.6 aspect ratio.
+                  final renderedHeight = constraints.maxWidth * 1.45;
+                  _maxOffsetY = (renderedHeight - constraints.maxHeight).clamp(0.0, 5000.0);
+
+                  return ClipRect(
+                    child: GestureDetector(
+                      onTap: () => _focusNode.requestFocus(),
+                      child: InteractiveViewer(
+                        transformationController: _transformController,
+                        panEnabled: false,
+                        scaleEnabled: false,
+                        child: SizedBox(
+                          width: constraints.maxWidth,
+                          height: renderedHeight > constraints.maxHeight
+                              ? renderedHeight
+                              : constraints.maxHeight,
+                          child: PDFView(
+                            filePath: _pdfFile!.path,
+                            // Strict single horizontal page flip
+                            swipeHorizontal: true,
+                            enableSwipe: true,
+                            autoSpacing: false,
+                            pageFling: false,
+                            pageSnap: true,
+                            fitPolicy: FitPolicy.WIDTH,
+                            // Prevent any Telegram / Ad web link clicks
+                            preventLinkNavigation: true,
+                            onRender: (pages) {
+                              setState(() {
+                                _totalPages = pages ?? 0;
+                              });
+                            },
+                            onViewCreated: (PDFViewController vc) {
+                              _pdfViewController = vc;
+                              _focusNode.requestFocus();
+                            },
+                            onPageChanged: (page, total) {
+                              setState(() {
+                                _currentPage = page ?? 0;
+                                _totalPages = total ?? 0;
+                              });
+                              _resetVerticalPan();
+                            },
+                            onError: (error) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('PDF render error: $error')),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
         bottomNavigationBar: _pdfFile != null
             ? Container(
@@ -375,7 +427,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                       ),
                       const SizedBox(width: 12),
                       const Text(
-                        '↑↓: Scroll  |  ←→: Turn Page  |  Ctrl+O: Open  |  Esc: Close',
+                        '↑↓: Pan Page  |  ←→: Turn Page  |  Ctrl+O: Open  |  Esc: Close',
                         style: TextStyle(fontSize: 11, color: Colors.black54),
                       ),
                       const Spacer(),
