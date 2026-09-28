@@ -20,7 +20,11 @@ class EPaperApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: const Color(0xFF6B1D1D),
-        scaffoldBackgroundColor: const Color(0xFFF7F5F0),
+        scaffoldBackgroundColor: const Color(0xFF1E1E1E), // Dark neutral reading backdrop
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF2C2C2C),
+          foregroundColor: Colors.white,
+        ),
       ),
       home: const EPaperViewerScreen(),
     );
@@ -286,17 +290,17 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.newspaper_rounded, size: 90, color: Colors.brown.shade300),
+                    Icon(Icons.newspaper_rounded, size: 90, color: Colors.grey.shade400),
                     const SizedBox(height: 20),
                     const Text(
                       'No ePaper loaded',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                     const SizedBox(height: 8),
                     const Text(
                       'Press Ctrl + O or click below to open a newspaper PDF.\nUse Esc or Ctrl + W to close.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 14, color: Colors.black54),
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
                     ),
                     const SizedBox(height: 24),
                     ElevatedButton.icon(
@@ -312,46 +316,50 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                 ),
               ),
             )
-          : PDFView(
-              filePath: _pdfFile!.path,
-              // Native vertical continuous page rendering:
-              // Gives 100% of the page visibility from top to bottom
-              swipeHorizontal: false,
-              enableSwipe: true,
-              autoSpacing: true,
-              pageFling: true,
-              pageSnap: true,
-              fitPolicy: FitPolicy.BOTH,
-              // Neutralize embedded Telegram/ad popups
-              preventLinkNavigation: true,
-              onRender: (pages) {
-                setState(() {
-                  _totalPages = pages ?? 0;
-                });
-              },
-              onViewCreated: (PDFViewController vc) {
-                _pdfViewController = vc;
-              },
-              onPageChanged: (page, total) {
-                setState(() {
-                  _currentPage = page ?? 0;
-                  _totalPages = total ?? 0;
-                });
-              },
-              onError: (error) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('PDF render error: $error')),
-                );
-              },
+          : Container(
+              color: const Color(0xFF1E1E1E),
+              child: PDFView(
+                filePath: _pdfFile!.path,
+                // Strict Horizontal page-by-page turning: NO vertical scrolling between pages
+                swipeHorizontal: true,
+                enableSwipe: true,
+                autoSpacing: false,
+                pageFling: false,
+                pageSnap: true,
+                // FIT TO HEIGHT: Displays the entire newspaper page top-to-bottom within the screen window,
+                // allowing unconstrained zoom-in to inspect columns.
+                fitPolicy: FitPolicy.HEIGHT,
+                // Blocks Telegram links and web ad redirections
+                preventLinkNavigation: true,
+                onRender: (pages) {
+                  setState(() {
+                    _totalPages = pages ?? 0;
+                  });
+                },
+                onViewCreated: (PDFViewController vc) {
+                  _pdfViewController = vc;
+                },
+                onPageChanged: (page, total) {
+                  setState(() {
+                    _currentPage = page ?? 0;
+                    _totalPages = total ?? 0;
+                  });
+                },
+                onError: (error) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('PDF render error: $error')),
+                  );
+                },
+              ),
             ),
       bottomNavigationBar: _pdfFile != null
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: const Color(0xFF2C2C2C),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
+                    color: Colors.black.withOpacity(0.3),
                     blurRadius: 8,
                     offset: const Offset(0, -2),
                   ),
@@ -362,17 +370,17 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                   children: [
                     Text(
                       'Page ${_currentPage + 1} / $_totalPages',
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.white),
                     ),
                     const SizedBox(width: 12),
                     const Text(
-                      '↑↓: Scroll Page  |  ←→: Turn Page  |  Ctrl+O: Open  |  Esc: Close',
-                      style: TextStyle(fontSize: 11, color: Colors.black54),
+                      '←→: Turn Page  |  Pinch/Double-tap: Zoom  |  Ctrl+O: Open',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
                     ),
                     const Spacer(),
                     FilledButton.icon(
                       style: FilledButton.styleFrom(
-                        backgroundColor: _isPlaying ? Colors.red.shade700 : const Color(0xFF6B1D1D),
+                        backgroundColor: _isPlaying ? Colors.red.shade700 : const Color(0xFF8B2D2D),
                       ),
                       onPressed: _toggleAudio,
                       icon: Icon(_isPlaying ? Icons.stop_rounded : Icons.volume_up_rounded),
@@ -386,7 +394,7 @@ class _EPaperViewerScreenState extends State<EPaperViewerScreen> {
                         padding: const EdgeInsets.all(8.0),
                         child: Text(
                           '${(_speechRate * 2).toStringAsFixed(1)}x',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                         ),
                       ),
                       onSelected: (val) {
