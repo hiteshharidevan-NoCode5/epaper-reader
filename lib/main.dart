@@ -43,7 +43,6 @@ class ReaderHomeScreen extends StatefulWidget {
 class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   PdfControllerPinch? _pdfController;
   final _appLinks = AppLinks();
-  final FocusNode _keyboardFocusNode = FocusNode();
   StreamSubscription<Uri>? _linkSubscription;
 
   String _documentTitle = 'ePaper Edition';
@@ -54,6 +53,8 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Intercept hardware keys directly at the engine level for Chromebook
+    HardwareKeyboard.instance.addHandler(_onHardwareKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initIncomingLinks();
     });
@@ -61,10 +62,67 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     _linkSubscription?.cancel();
-    _keyboardFocusNode.dispose();
     _pdfController?.dispose();
     super.dispose();
+  }
+
+  bool _onHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+
+    final key = event.logicalKey;
+    final isCtrl = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isAltPressed;
+
+    // --- OPEN FILE (Ctrl+O or simply pressing 'O') ---
+    if ((isCtrl && key == LogicalKeyboardKey.keyO) || key == LogicalKeyboardKey.keyO) {
+      _pickLocalFile();
+      return true;
+    }
+
+    // --- CLOSE DOCUMENT (Ctrl+W, Esc, 'Q', or 'X') ---
+    if ((isCtrl && key == LogicalKeyboardKey.keyW) ||
+        key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.keyQ ||
+        key == LogicalKeyboardKey.keyX) {
+      if (_pdfController != null) {
+        _closeDocument();
+        return true;
+      }
+    }
+
+    // --- PAGE TURNS (Left/Right, PageUp/PageDown, [ / ]) ---
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.pageDown ||
+        key == LogicalKeyboardKey.bracketRight) {
+      _nextPage();
+      return true;
+    } else if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.pageUp ||
+        key == LogicalKeyboardKey.bracketLeft) {
+      _prevPage();
+      return true;
+    }
+
+    // --- ZOOM CONTROLS (+ / -, Ctrl + / -, 0) ---
+    if (key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd) {
+      _zoomIn();
+      return true;
+    } else if (key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract) {
+      _zoomOut();
+      return true;
+    } else if (key == LogicalKeyboardKey.digit0 ||
+        key == LogicalKeyboardKey.numpad0) {
+      _zoomReset();
+      return true;
+    }
+
+    return false;
   }
 
   Future<void> _initIncomingLinks() async {
@@ -127,10 +185,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         _pdfController = controller;
         _isLoading = false;
       });
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _keyboardFocusNode.requestFocus();
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -166,7 +220,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       _pageCount = 0;
       _currentPage = 1;
     });
-    _keyboardFocusNode.requestFocus();
   }
 
   void _nextPage() {
@@ -187,15 +240,14 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     }
   }
 
-  // --- Zoom Functions ---
   void _zoomIn() {
     if (_pdfController == null) return;
     try {
       final currentMatrix = _pdfController!.value;
-      final newMatrix = Matrix4.copy(currentMatrix)..scale(1.25, 1.25);
+      final newMatrix = Matrix4.copy(currentMatrix)..scale(1.3, 1.3);
       _pdfController!.goTo(
         destination: newMatrix,
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
       );
     } catch (_) {}
@@ -205,10 +257,10 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     if (_pdfController == null) return;
     try {
       final currentMatrix = _pdfController!.value;
-      final newMatrix = Matrix4.copy(currentMatrix)..scale(0.8, 0.8);
+      final newMatrix = Matrix4.copy(currentMatrix)..scale(0.77, 0.77);
       _pdfController!.goTo(
         destination: newMatrix,
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
       );
     } catch (_) {}
@@ -221,172 +273,109 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       if (matrix != null) {
         _pdfController!.goTo(
           destination: matrix,
-          duration: const Duration(milliseconds: 200),
+          duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
         );
       }
     } catch (_) {}
   }
 
-  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
-    final isCtrl = HardwareKeyboard.instance.isControlPressed ||
-        HardwareKeyboard.instance.isMetaPressed;
-
-    // Ctrl + O: Open file
-    if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyO) {
-      _pickLocalFile();
-      return KeyEventResult.handled;
-    }
-
-    // Ctrl + W or Escape: Close
-    if ((isCtrl && event.logicalKey == LogicalKeyboardKey.keyW) ||
-        event.logicalKey == LogicalKeyboardKey.escape) {
-      if (_pdfController != null) {
-        _closeDocument();
-        return KeyEventResult.handled;
-      }
-    }
-
-    // Zoom Shortcuts: Ctrl + Plus / Equal, Ctrl + Minus, Ctrl + 0
-    if (isCtrl) {
-      if (event.logicalKey == LogicalKeyboardKey.equal ||
-          event.logicalKey == LogicalKeyboardKey.numpadAdd) {
-        _zoomIn();
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.minus ||
-          event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
-        _zoomOut();
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.digit0 ||
-          event.logicalKey == LogicalKeyboardKey.numpad0) {
-        _zoomReset();
-        return KeyEventResult.handled;
-      }
-    }
-
-    // Arrow keys & Page navigation
-    if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
-        event.logicalKey == LogicalKeyboardKey.pageDown) {
-      _nextPage();
-      return KeyEventResult.handled;
-    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-        event.logicalKey == LogicalKeyboardKey.pageUp) {
-      _prevPage();
-      return KeyEventResult.handled;
-    }
-
-    return KeyEventResult.ignored;
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _keyboardFocusNode,
-      autofocus: true,
-      onKeyEvent: _handleKeyEvent,
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () => _keyboardFocusNode.requestFocus(),
-        child: Scaffold(
-          appBar: AppBar(
-            title: Text(
-              _pdfController != null ? _documentTitle : 'ePaper Reader',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
-            ),
-            actions: [
-              if (_pdfController != null) ...[
-                // Zoom Controls
-                IconButton(
-                  tooltip: 'Zoom Out (Ctrl -)',
-                  icon: const Icon(Icons.remove_circle_outline_rounded),
-                  onPressed: _zoomOut,
-                ),
-                IconButton(
-                  tooltip: 'Reset Zoom (Ctrl 0)',
-                  icon: const Icon(Icons.fit_screen_rounded),
-                  onPressed: _zoomReset,
-                ),
-                IconButton(
-                  tooltip: 'Zoom In (Ctrl +)',
-                  icon: const Icon(Icons.add_circle_outline_rounded),
-                  onPressed: _zoomIn,
-                ),
-                const SizedBox(width: 8),
-                // Page Navigation Controls
-                IconButton(
-                  tooltip: 'Previous Page (←)',
-                  icon: const Icon(Icons.chevron_left_rounded),
-                  onPressed: _currentPage > 1 ? _prevPage : null,
-                ),
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                    child: Text(
-                      '$_currentPage / $_pageCount',
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Next Page (→)',
-                  icon: const Icon(Icons.chevron_right_rounded),
-                  onPressed: _currentPage < _pageCount ? _nextPage : null,
-                ),
-                IconButton(
-                  tooltip: 'Close (Esc / Ctrl+W)',
-                  icon: const Icon(Icons.close_rounded),
-                  onPressed: _closeDocument,
-                ),
-              ],
-              IconButton(
-                tooltip: 'Open PDF (Ctrl+O)',
-                icon: const Icon(Icons.folder_open_rounded),
-                onPressed: _pickLocalFile,
-              ),
-            ],
-          ),
-          body: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _pdfController == null
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.newspaper_rounded, size: 84, color: Colors.white24),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'ePaper Reader',
-                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Press Ctrl + O to open a newspaper PDF.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 14, color: Colors.white54),
-                          ),
-                          const SizedBox(height: 20),
-                          FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF6B1D1D),
-                            ),
-                            icon: const Icon(Icons.folder_open_rounded),
-                            label: const Text('Open ePaper (Ctrl+O)'),
-                            onPressed: _pickLocalFile,
-                          ),
-                        ],
-                      ),
-                    )
-                  : PdfViewPinch(
-                      controller: _pdfController!,
-                      onPageChanged: (page) {
-                        setState(() => _currentPage = page);
-                      },
-                    ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          _pdfController != null ? _documentTitle : 'ePaper Reader',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          overflow: TextOverflow.ellipsis,
         ),
+        actions: [
+          if (_pdfController != null) ...[
+            IconButton(
+              tooltip: 'Zoom Out (-)',
+              icon: const Icon(Icons.remove_circle_outline_rounded),
+              onPressed: _zoomOut,
+            ),
+            IconButton(
+              tooltip: 'Reset Fit (0)',
+              icon: const Icon(Icons.fit_screen_rounded),
+              onPressed: _zoomReset,
+            ),
+            IconButton(
+              tooltip: 'Zoom In (+)',
+              icon: const Icon(Icons.add_circle_outline_rounded),
+              onPressed: _zoomIn,
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Previous Page (←)',
+              icon: const Icon(Icons.chevron_left_rounded),
+              onPressed: _currentPage > 1 ? _prevPage : null,
+            ),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                child: Text(
+                  '$_currentPage / $_pageCount',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Next Page (→)',
+              icon: const Icon(Icons.chevron_right_rounded),
+              onPressed: _currentPage < _pageCount ? _nextPage : null,
+            ),
+            IconButton(
+              tooltip: 'Close (Esc / Q)',
+              icon: const Icon(Icons.close_rounded),
+              onPressed: _closeDocument,
+            ),
+          ],
+          IconButton(
+            tooltip: 'Open PDF (O)',
+            icon: const Icon(Icons.folder_open_rounded),
+            onPressed: _pickLocalFile,
+          ),
+        ],
       ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _pdfController == null
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.newspaper_rounded, size: 84, color: Colors.white24),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'ePaper Reader',
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Press O to open a newspaper PDF.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.white54),
+                      ),
+                      const SizedBox(height: 20),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF6B1D1D),
+                        ),
+                        icon: const Icon(Icons.folder_open_rounded),
+                        label: const Text('Open ePaper (O)'),
+                        onPressed: _pickLocalFile,
+                      ),
+                    ],
+                  ),
+                )
+              : PdfViewPinch(
+                  controller: _pdfController!,
+                  onPageChanged: (page) {
+                    setState(() => _currentPage = page);
+                  },
+                ),
     );
   }
 }
