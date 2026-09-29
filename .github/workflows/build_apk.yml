@@ -28,8 +28,10 @@ jobs:
 
       - name: Configure Android Project (SDK & Kotlin & PDF Handler)
         run: |
-          sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
+          # Set minSdkVersion to 24 (required by uri_content / modern streaming)
+          sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 24/' android/app/build.gradle
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle
+          # Update Kotlin version to 1.9.22
           sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
 
