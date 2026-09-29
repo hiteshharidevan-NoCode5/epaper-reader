@@ -24,7 +24,7 @@ jobs:
           channel: 'stable'
 
       - name: Flutter Create Platform Files
-        run: flutter create . --org com.example
+        run: flutter create . --org com.example --project-name epaper_reader
 
       - name: Configure Android Project (SDK & Kotlin & PDF Handler)
         run: |
