@@ -1,8 +1,9 @@
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:app_links/app_links.dart';
+import 'package:uri_content/uri_content.dart';
 
 void main() {
   runApp(const LightweightEPaperApp());
@@ -19,9 +20,9 @@ class LightweightEPaperApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF181818),
+        scaffoldBackgroundColor: const Color(0xFF141414),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF222222),
+          backgroundColor: Color(0xFF1E1E1E),
           elevation: 0,
         ),
       ),
@@ -40,9 +41,12 @@ class ReaderHomeScreen extends StatefulWidget {
 class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   PdfControllerPinch? _pdfController;
   final _appLinks = AppLinks();
-  String? _documentTitle;
+  final _uriContent = UriContent();
+
+  String _documentTitle = 'ePaper Edition';
   int _pageCount = 0;
   int _currentPage = 1;
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -58,43 +62,58 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     super.dispose();
   }
 
-  // Listens to WhatsApp / Telegram taps
   Future<void> _initIncomingLinks() async {
-    // Check initial launch intent
-    final initialUri = await _appLinks.getInitialLink();
-    if (initialUri != null) {
-      _loadPdfFromUri(initialUri);
-    }
+    try {
+      final initialUri = await _appLinks.getInitialLink();
+      if (initialUri != null) {
+        _loadPdfFromUri(initialUri);
+      }
+    } catch (_) {}
 
-    // Check incoming intent while app is running in background
     _appLinks.uriLinkStream.listen((uri) {
       _loadPdfFromUri(uri);
     });
   }
 
   Future<void> _loadPdfFromUri(Uri uri) async {
+    setState(() => _isLoading = true);
     try {
-      PdfDocument document;
+      Uint8List bytes;
+
+      // Safe extraction of bytes from content:// or file:// or network
       if (uri.scheme == 'content') {
-        // Direct stream from Telegram / WhatsApp provider
-        document = await PdfDocument.openData(
-          await File.fromUri(uri).readAsBytes(),
-        );
+        bytes = await _uriContent.from(uri);
+      } else if (uri.scheme == 'file') {
+        // Only call toFilePath if it's explicitly a file:// scheme
+        bytes = await _uriContent.from(uri);
       } else {
-        document = await PdfDocument.openFile(uri.toFilePath());
+        bytes = await _uriContent.from(uri);
       }
+
+      final document = await PdfDocument.openData(bytes);
+
+      // Safe title extraction that never calls .pathSegments on content URIs
+      String title = 'ePaper Edition';
+      try {
+        if (uri.path.isNotEmpty) {
+          title = uri.path.split('/').last;
+        }
+      } catch (_) {}
 
       _pdfController?.dispose();
       setState(() {
-        _documentTitle = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'ePaper Edition';
+        _documentTitle = title.isNotEmpty ? title : 'ePaper Edition';
         _pageCount = document.pagesCount;
         _currentPage = 1;
         _pdfController = PdfControllerPinch(
           document: Future.value(document),
           initialPage: 1,
         );
+        _isLoading = false;
       });
     } catch (e) {
+      setState(() => _isLoading = false);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load document: $e')),
       );
@@ -105,7 +124,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     _pdfController?.dispose();
     setState(() {
       _pdfController = null;
-      _documentTitle = null;
+      _documentTitle = 'ePaper Edition';
       _pageCount = 0;
       _currentPage = 1;
     });
@@ -152,7 +171,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       appBar: _pdfController != null
           ? AppBar(
               title: Text(
-                _documentTitle ?? 'ePaper Reader',
+                _documentTitle,
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -194,31 +213,34 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
               ],
             )
           : null,
-      body: _pdfController == null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.newspaper_rounded, size: 84, color: Colors.white24),
-                  SizedBox(height: 16),
-                  Text(
-                    'ePaper Reader',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _pdfController == null
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.newspaper_rounded, size: 84, color: Colors.white24),
+                      SizedBox(height: 16),
+                      Text(
+                        'ePaper Reader',
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Open any ePaper directly from Telegram, WhatsApp, or Files.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.white54),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 6),
-                  Text(
-                    'Open any ePaper directly from Telegram or WhatsApp.',
-                    style: TextStyle(fontSize: 14, color: Colors.white54),
-                  ),
-                ],
-              ),
-            )
-          : PdfViewPinch(
-              controller: _pdfController!,
-              onPageChanged: (page) {
-                setState(() => _currentPage = page);
-              },
-            ),
+                )
+              : PdfViewPinch(
+                  controller: _pdfController!,
+                  onPageChanged: (page) {
+                    setState(() => _currentPage = page);
+                  },
+                ),
     );
   }
 }
