@@ -78,42 +78,34 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   Future<void> _loadPdfFromUri(Uri uri) async {
     setState(() => _isLoading = true);
     try {
-      Uint8List bytes;
+      Uint8List bytes = await _uriContent.from(uri);
 
-      // Safe extraction of bytes from content:// or file:// or network
-      if (uri.scheme == 'content') {
-        bytes = await _uriContent.from(uri);
-      } else if (uri.scheme == 'file') {
-        // Only call toFilePath if it's explicitly a file:// scheme
-        bytes = await _uriContent.from(uri);
-      } else {
-        bytes = await _uriContent.from(uri);
-      }
-
-      final document = await PdfDocument.openData(bytes);
-
-      // Safe title extraction that never calls .pathSegments on content URIs
       String title = 'ePaper Edition';
       try {
-        if (uri.path.isNotEmpty) {
-          title = uri.path.split('/').last;
+        if (uri.pathSegments.isNotEmpty) {
+          title = uri.pathSegments.last;
         }
       } catch (_) {}
 
       _pdfController?.dispose();
+      final controller = PdfControllerPinch(
+        document: PdfDocument.openData(bytes),
+        initialPage: 1,
+      );
+
+      final doc = await controller.document;
+
+      if (!mounted) return;
       setState(() {
         _documentTitle = title.isNotEmpty ? title : 'ePaper Edition';
-        _pageCount = document.pagesCount;
+        _pageCount = doc.pagesCount;
         _currentPage = 1;
-        _pdfController = PdfControllerPinch(
-          document: Future.value(document),
-          initialPage: 1,
-        );
+        _pdfController = controller;
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
       if (!mounted) return;
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load document: $e')),
       );
