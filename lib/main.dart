@@ -1,11 +1,15 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:app_links/app_links.dart';
 import 'package:uri_content/uri_content.dart';
+import 'package:file_picker/file_picker.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const LightweightEPaperApp());
 }
 
@@ -42,6 +46,8 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   PdfControllerPinch? _pdfController;
   final _appLinks = AppLinks();
   final _uriContent = UriContent();
+  final FocusNode _keyboardFocusNode = FocusNode();
+  StreamSubscription<Uri>? _linkSubscription;
 
   String _documentTitle = 'ePaper Edition';
   int _pageCount = 0;
@@ -51,34 +57,69 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   @override
   void initState() {
     super.initState();
-    _initIncomingLinks();
-    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    // Non-blocking initialization
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initIncomingLinks();
+    });
   }
 
   @override
   void dispose() {
-    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    _linkSubscription?.cancel();
+    _keyboardFocusNode.dispose();
     _pdfController?.dispose();
     super.dispose();
   }
 
   Future<void> _initIncomingLinks() async {
     try {
-      final initialUri = await _appLinks.getInitialLink();
+      final initialUri = await _appLinks.getInitialLink().timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => null,
+      );
       if (initialUri != null) {
         _loadPdfFromUri(initialUri);
       }
     } catch (_) {}
 
-    _appLinks.uriLinkStream.listen((uri) {
-      _loadPdfFromUri(uri);
-    });
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      (uri) {
+        _loadPdfFromUri(uri);
+      },
+      onError: (_) {},
+    );
+  }
+
+  Future<void> _pickLocalFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
+      if (result != null && result.files.single.path != null) {
+        final path = result.files.single.path!;
+        final file = File(path);
+        final bytes = await file.readAsBytes();
+        _openPdfData(bytes, result.files.single.name);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to open file: $e')),
+      );
+    }
   }
 
   Future<void> _loadPdfFromUri(Uri uri) async {
+    if (_isLoading) return;
     setState(() => _isLoading = true);
+
     try {
-      Uint8List bytes = await _uriContent.from(uri);
+      // 5-second timeout to prevent indefinite hangs if permission was revoked
+      final Uint8List bytes = await _uriContent.from(uri).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => throw TimeoutException('File access timed out'),
+      );
 
       String title = 'ePaper Edition';
       try {
@@ -87,29 +128,37 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         }
       } catch (_) {}
 
-      _pdfController?.dispose();
-      final controller = PdfControllerPinch(
-        document: PdfDocument.openData(bytes),
-        initialPage: 1,
-      );
-
-      final doc = await controller.document;
-
-      if (!mounted) return;
-      setState(() {
-        _documentTitle = title.isNotEmpty ? title : 'ePaper Edition';
-        _pageCount = doc.pagesCount;
-        _currentPage = 1;
-        _pdfController = controller;
-        _isLoading = false;
-      });
+      await _openPdfData(bytes, title);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load document: $e')),
+        SnackBar(content: Text('Could not open document: $e')),
       );
     }
+  }
+
+  Future<void> _openPdfData(Uint8List bytes, String title) async {
+    _pdfController?.dispose();
+    final controller = PdfControllerPinch(
+      document: PdfDocument.openData(bytes),
+      initialPage: 1,
+    );
+
+    final doc = await controller.document;
+
+    if (!mounted) return;
+    setState(() {
+      _documentTitle = title.isNotEmpty ? title : 'ePaper Edition';
+      _pageCount = doc.pagesCount;
+      _currentPage = 1;
+      _pdfController = controller;
+      _isLoading = false;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _keyboardFocusNode.requestFocus();
+    });
   }
 
   void _closeDocument() {
@@ -120,63 +169,81 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       _pageCount = 0;
       _currentPage = 1;
     });
+    _keyboardFocusNode.requestFocus();
   }
 
-  bool _handleKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent) return false;
+  void _nextPage() {
+    if (_pdfController != null && _currentPage < _pageCount) {
+      _pdfController!.nextPage(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  void _prevPage() {
+    if (_pdfController != null && _currentPage > 1) {
+      _pdfController!.previousPage(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
+
+    if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyO) {
+      _pickLocalFile();
+      return KeyEventResult.handled;
+    }
 
     if ((isCtrl && event.logicalKey == LogicalKeyboardKey.keyW) ||
         event.logicalKey == LogicalKeyboardKey.escape) {
       if (_pdfController != null) {
         _closeDocument();
-        return true;
+        return KeyEventResult.handled;
       }
     }
 
-    if (_pdfController != null) {
-      if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
-          event.logicalKey == LogicalKeyboardKey.pageDown) {
-        _pdfController!.nextPage(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
-        );
-        return true;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-          event.logicalKey == LogicalKeyboardKey.pageUp) {
-        _pdfController!.previousPage(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
-        );
-        return true;
-      }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
+        event.logicalKey == LogicalKeyboardKey.pageDown) {
+      _nextPage();
+      return KeyEventResult.handled;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+        event.logicalKey == LogicalKeyboardKey.pageUp) {
+      _prevPage();
+      return KeyEventResult.handled;
     }
 
-    return false;
+    return KeyEventResult.ignored;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: _pdfController != null
-          ? AppBar(
-              title: Text(
-                _documentTitle,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-              ),
-              actions: [
+    return Focus(
+      focusNode: _keyboardFocusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => _keyboardFocusNode.requestFocus(),
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(
+              _pdfController != null ? _documentTitle : 'ePaper Reader',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+            ),
+            actions: [
+              if (_pdfController != null) ...[
                 IconButton(
                   tooltip: 'Previous Page (←)',
                   icon: const Icon(Icons.chevron_left_rounded),
-                  onPressed: _currentPage > 1
-                      ? () => _pdfController?.previousPage(
-                            duration: const Duration(milliseconds: 150),
-                            curve: Curves.easeOut,
-                          )
-                      : null,
+                  onPressed: _currentPage > 1 ? _prevPage : null,
                 ),
                 Center(
                   child: Padding(
@@ -190,12 +257,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                 IconButton(
                   tooltip: 'Next Page (→)',
                   icon: const Icon(Icons.chevron_right_rounded),
-                  onPressed: _currentPage < _pageCount
-                      ? () => _pdfController?.nextPage(
-                            duration: const Duration(milliseconds: 150),
-                            curve: Curves.easeOut,
-                          )
-                      : null,
+                  onPressed: _currentPage < _pageCount ? _nextPage : null,
                 ),
                 IconButton(
                   tooltip: 'Close (Esc / Ctrl+W)',
@@ -203,36 +265,52 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                   onPressed: _closeDocument,
                 ),
               ],
-            )
-          : null,
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _pdfController == null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.newspaper_rounded, size: 84, color: Colors.white24),
-                      SizedBox(height: 16),
-                      Text(
-                        'ePaper Reader',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+              IconButton(
+                tooltip: 'Open PDF (Ctrl+O)',
+                icon: const Icon(Icons.folder_open_rounded),
+                onPressed: _pickLocalFile,
+              ),
+            ],
+          ),
+          body: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _pdfController == null
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.newspaper_rounded, size: 84, color: Colors.white24),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'ePaper Reader',
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Tap any ePaper in Telegram, WhatsApp, or press Ctrl + O.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14, color: Colors.white54),
+                          ),
+                          const SizedBox(height: 20),
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF6B1D1D),
+                            ),
+                            icon: const Icon(Icons.folder_open_rounded),
+                            label: const Text('Open ePaper (Ctrl+O)'),
+                            onPressed: _pickLocalFile,
+                          ),
+                        ],
                       ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Open any ePaper directly from Telegram, WhatsApp, or Files.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 14, color: Colors.white54),
-                      ),
-                    ],
-                  ),
-                )
-              : PdfViewPinch(
-                  controller: _pdfController!,
-                  onPageChanged: (page) {
-                    setState(() => _currentPage = page);
-                  },
-                ),
+                    )
+                  : PdfViewPinch(
+                      controller: _pdfController!,
+                      onPageChanged: (page) {
+                        setState(() => _currentPage = page);
+                      },
+                    ),
+        ),
+      ),
     );
   }
 }
