@@ -1,5 +1,5 @@
 name: epaper_reader
-description: "ePaper PDF Reader with Text-to-Speech"
+description: "Ultra-lightweight ePaper PDF Reader"
 publish_to: "none"
 version: 1.0.0+1
 
@@ -9,9 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_tts: 4.0.2
-  file_picker: 6.1.1
-  flutter_pdfview: 1.3.2
+  pdfx: ^2.6.0
+  app_links: ^6.1.1
 
 dev_dependencies:
   flutter_test:
