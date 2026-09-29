@@ -92,7 +92,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       String path = uri.toFilePath();
       await _openFilePath(path, uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'ePaper Edition');
     } catch (_) {
-      // Fallback for content:// or non-standard file paths
       try {
         final filePath = uri.path;
         if (filePath.isNotEmpty && File(filePath).existsSync()) {
@@ -188,6 +187,47 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     }
   }
 
+  // --- Zoom Functions ---
+  void _zoomIn() {
+    if (_pdfController == null) return;
+    try {
+      final currentMatrix = _pdfController!.value;
+      final newMatrix = Matrix4.copy(currentMatrix)..scale(1.25, 1.25);
+      _pdfController!.goTo(
+        destination: newMatrix,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    } catch (_) {}
+  }
+
+  void _zoomOut() {
+    if (_pdfController == null) return;
+    try {
+      final currentMatrix = _pdfController!.value;
+      final newMatrix = Matrix4.copy(currentMatrix)..scale(0.8, 0.8);
+      _pdfController!.goTo(
+        destination: newMatrix,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    } catch (_) {}
+  }
+
+  void _zoomReset() {
+    if (_pdfController == null) return;
+    try {
+      final matrix = _pdfController!.calculatePageFitMatrix(pageNumber: _currentPage);
+      if (matrix != null) {
+        _pdfController!.goTo(
+          destination: matrix,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    } catch (_) {}
+  }
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
@@ -205,6 +245,23 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         event.logicalKey == LogicalKeyboardKey.escape) {
       if (_pdfController != null) {
         _closeDocument();
+        return KeyEventResult.handled;
+      }
+    }
+
+    // Zoom Shortcuts: Ctrl + Plus / Equal, Ctrl + Minus, Ctrl + 0
+    if (isCtrl) {
+      if (event.logicalKey == LogicalKeyboardKey.equal ||
+          event.logicalKey == LogicalKeyboardKey.numpadAdd) {
+        _zoomIn();
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.minus ||
+          event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
+        _zoomOut();
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.digit0 ||
+          event.logicalKey == LogicalKeyboardKey.numpad0) {
+        _zoomReset();
         return KeyEventResult.handled;
       }
     }
@@ -241,6 +298,24 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
             ),
             actions: [
               if (_pdfController != null) ...[
+                // Zoom Controls
+                IconButton(
+                  tooltip: 'Zoom Out (Ctrl -)',
+                  icon: const Icon(Icons.remove_circle_outline_rounded),
+                  onPressed: _zoomOut,
+                ),
+                IconButton(
+                  tooltip: 'Reset Zoom (Ctrl 0)',
+                  icon: const Icon(Icons.fit_screen_rounded),
+                  onPressed: _zoomReset,
+                ),
+                IconButton(
+                  tooltip: 'Zoom In (Ctrl +)',
+                  icon: const Icon(Icons.add_circle_outline_rounded),
+                  onPressed: _zoomIn,
+                ),
+                const SizedBox(width: 8),
+                // Page Navigation Controls
                 IconButton(
                   tooltip: 'Previous Page (←)',
                   icon: const Icon(Icons.chevron_left_rounded),
@@ -248,7 +323,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                 ),
                 Center(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 6.0),
                     child: Text(
                       '$_currentPage / $_pageCount',
                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
