@@ -1,11 +1,9 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:app_links/app_links.dart';
-import 'package:uri_content/uri_content.dart';
 import 'package:file_picker/file_picker.dart';
 
 void main() {
@@ -45,7 +43,6 @@ class ReaderHomeScreen extends StatefulWidget {
 class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   PdfControllerPinch? _pdfController;
   final _appLinks = AppLinks();
-  final _uriContent = UriContent();
   final FocusNode _keyboardFocusNode = FocusNode();
   StreamSubscription<Uri>? _linkSubscription;
 
@@ -57,7 +54,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Non-blocking initialization
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initIncomingLinks();
     });
@@ -78,16 +74,71 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         onTimeout: () => null,
       );
       if (initialUri != null) {
-        _loadPdfFromUri(initialUri);
+        _handleUri(initialUri);
       }
     } catch (_) {}
 
     _linkSubscription = _appLinks.uriLinkStream.listen(
-      (uri) {
-        _loadPdfFromUri(uri);
-      },
+      (uri) => _handleUri(uri),
       onError: (_) {},
     );
+  }
+
+  Future<void> _handleUri(Uri uri) async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+
+    try {
+      String path = uri.toFilePath();
+      await _openFilePath(path, uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'ePaper Edition');
+    } catch (_) {
+      // Fallback for content:// or non-standard file paths
+      try {
+        final filePath = uri.path;
+        if (filePath.isNotEmpty && File(filePath).existsSync()) {
+          await _openFilePath(filePath, 'ePaper Edition');
+        } else {
+          throw Exception('Unable to read direct URI');
+        }
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open document from link. Please use Ctrl+O to select.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openFilePath(String path, String title) async {
+    try {
+      _pdfController?.dispose();
+      final controller = PdfControllerPinch(
+        document: PdfDocument.openFile(path),
+        initialPage: 1,
+      );
+
+      final doc = await controller.document;
+
+      if (!mounted) return;
+      setState(() {
+        _documentTitle = title;
+        _pageCount = doc.pagesCount;
+        _currentPage = 1;
+        _pdfController = controller;
+        _isLoading = false;
+      });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _keyboardFocusNode.requestFocus();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load PDF: $e')),
+      );
+    }
   }
 
   Future<void> _pickLocalFile() async {
@@ -98,67 +149,14 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       );
       if (result != null && result.files.single.path != null) {
         final path = result.files.single.path!;
-        final file = File(path);
-        final bytes = await file.readAsBytes();
-        _openPdfData(bytes, result.files.single.name);
+        await _openFilePath(path, result.files.single.name);
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to open file: $e')),
+        SnackBar(content: Text('Error choosing file: $e')),
       );
     }
-  }
-
-  Future<void> _loadPdfFromUri(Uri uri) async {
-    if (_isLoading) return;
-    setState(() => _isLoading = true);
-
-    try {
-      // 5-second timeout to prevent indefinite hangs if permission was revoked
-      final Uint8List bytes = await _uriContent.from(uri).timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => throw TimeoutException('File access timed out'),
-      );
-
-      String title = 'ePaper Edition';
-      try {
-        if (uri.pathSegments.isNotEmpty) {
-          title = uri.pathSegments.last;
-        }
-      } catch (_) {}
-
-      await _openPdfData(bytes, title);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open document: $e')),
-      );
-    }
-  }
-
-  Future<void> _openPdfData(Uint8List bytes, String title) async {
-    _pdfController?.dispose();
-    final controller = PdfControllerPinch(
-      document: PdfDocument.openData(bytes),
-      initialPage: 1,
-    );
-
-    final doc = await controller.document;
-
-    if (!mounted) return;
-    setState(() {
-      _documentTitle = title.isNotEmpty ? title : 'ePaper Edition';
-      _pageCount = doc.pagesCount;
-      _currentPage = 1;
-      _pdfController = controller;
-      _isLoading = false;
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _keyboardFocusNode.requestFocus();
-    });
   }
 
   void _closeDocument() {
@@ -175,7 +173,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   void _nextPage() {
     if (_pdfController != null && _currentPage < _pageCount) {
       _pdfController!.nextPage(
-        duration: const Duration(milliseconds: 150),
+        duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
     }
@@ -184,7 +182,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   void _prevPage() {
     if (_pdfController != null && _currentPage > 1) {
       _pdfController!.previousPage(
-        duration: const Duration(milliseconds: 150),
+        duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
     }
@@ -196,11 +194,13 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
 
+    // Ctrl + O: Open file
     if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyO) {
       _pickLocalFile();
       return KeyEventResult.handled;
     }
 
+    // Ctrl + W or Escape: Close
     if ((isCtrl && event.logicalKey == LogicalKeyboardKey.keyW) ||
         event.logicalKey == LogicalKeyboardKey.escape) {
       if (_pdfController != null) {
@@ -209,6 +209,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       }
     }
 
+    // Arrow keys & Page navigation
     if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
         event.logicalKey == LogicalKeyboardKey.pageDown) {
       _nextPage();
@@ -287,7 +288,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'Tap any ePaper in Telegram, WhatsApp, or press Ctrl + O.',
+                            'Press Ctrl + O to open a newspaper PDF.',
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 14, color: Colors.white54),
                           ),
