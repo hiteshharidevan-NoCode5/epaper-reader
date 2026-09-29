@@ -53,7 +53,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Intercept hardware keys directly at the engine level for Chromebook
     HardwareKeyboard.instance.addHandler(_onHardwareKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initIncomingLinks();
@@ -76,7 +75,42 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         HardwareKeyboard.instance.isMetaPressed ||
         HardwareKeyboard.instance.isAltPressed;
 
-    // --- OPEN FILE (Ctrl+O or simply pressing 'O') ---
+    // --- ZOOM IN (+, =, or Ctrl + =) ---
+    if (key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd) {
+      _zoomBy(1.3);
+      return true;
+    }
+
+    // --- ZOOM OUT (-, or Ctrl + -) ---
+    if (key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract) {
+      _zoomBy(0.77);
+      return true;
+    }
+
+    // --- RESET ZOOM (0) ---
+    if (key == LogicalKeyboardKey.digit0 ||
+        key == LogicalKeyboardKey.numpad0) {
+      _zoomReset();
+      return true;
+    }
+
+    // --- TURN PAGES (Left/Right, PageUp/PageDown, [ / ]) ---
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.pageDown ||
+        key == LogicalKeyboardKey.bracketRight) {
+      _nextPage();
+      return true;
+    } else if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.pageUp ||
+        key == LogicalKeyboardKey.bracketLeft) {
+      _prevPage();
+      return true;
+    }
+
+    // --- OPEN FILE (Ctrl+O or 'O') ---
     if ((isCtrl && key == LogicalKeyboardKey.keyO) || key == LogicalKeyboardKey.keyO) {
       _pickLocalFile();
       return true;
@@ -91,35 +125,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         _closeDocument();
         return true;
       }
-    }
-
-    // --- PAGE TURNS (Left/Right, PageUp/PageDown, [ / ]) ---
-    if (key == LogicalKeyboardKey.arrowRight ||
-        key == LogicalKeyboardKey.pageDown ||
-        key == LogicalKeyboardKey.bracketRight) {
-      _nextPage();
-      return true;
-    } else if (key == LogicalKeyboardKey.arrowLeft ||
-        key == LogicalKeyboardKey.pageUp ||
-        key == LogicalKeyboardKey.bracketLeft) {
-      _prevPage();
-      return true;
-    }
-
-    // --- ZOOM CONTROLS (+ / -, Ctrl + / -, 0) ---
-    if (key == LogicalKeyboardKey.equal ||
-        key == LogicalKeyboardKey.add ||
-        key == LogicalKeyboardKey.numpadAdd) {
-      _zoomIn();
-      return true;
-    } else if (key == LogicalKeyboardKey.minus ||
-        key == LogicalKeyboardKey.numpadSubtract) {
-      _zoomOut();
-      return true;
-    } else if (key == LogicalKeyboardKey.digit0 ||
-        key == LogicalKeyboardKey.numpad0) {
-      _zoomReset();
-      return true;
     }
 
     return false;
@@ -240,27 +245,22 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     }
   }
 
-  void _zoomIn() {
+  void _zoomBy(double factor) {
     if (_pdfController == null) return;
     try {
-      final currentMatrix = _pdfController!.value;
-      final newMatrix = Matrix4.copy(currentMatrix)..scale(1.3, 1.3);
-      _pdfController!.goTo(
-        destination: newMatrix,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
-    } catch (_) {}
-  }
+      final Size screenSize = MediaQuery.of(context).size;
+      final Offset center = Offset(screenSize.width / 2, screenSize.height / 2);
 
-  void _zoomOut() {
-    if (_pdfController == null) return;
-    try {
-      final currentMatrix = _pdfController!.value;
-      final newMatrix = Matrix4.copy(currentMatrix)..scale(0.77, 0.77);
+      final Matrix4 current = _pdfController!.value;
+      final Matrix4 translationToCenter = Matrix4.translationValues(-center.dx, -center.dy, 0);
+      final Matrix4 scaleMatrix = Matrix4.diagonal3Values(factor, factor, 1.0);
+      final Matrix4 translationBack = Matrix4.translationValues(center.dx, center.dy, 0);
+
+      final Matrix4 newMatrix = translationBack * scaleMatrix * translationToCenter * current;
+
       _pdfController!.goTo(
         destination: newMatrix,
-        duration: const Duration(milliseconds: 180),
+        duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
     } catch (_) {}
@@ -273,7 +273,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       if (matrix != null) {
         _pdfController!.goTo(
           destination: matrix,
-          duration: const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
       }
@@ -294,7 +294,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
             IconButton(
               tooltip: 'Zoom Out (-)',
               icon: const Icon(Icons.remove_circle_outline_rounded),
-              onPressed: _zoomOut,
+              onPressed: () => _zoomBy(0.77),
             ),
             IconButton(
               tooltip: 'Reset Fit (0)',
@@ -304,7 +304,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
             IconButton(
               tooltip: 'Zoom In (+)',
               icon: const Icon(Icons.add_circle_outline_rounded),
-              onPressed: _zoomIn,
+              onPressed: () => _zoomBy(1.3),
             ),
             const SizedBox(width: 8),
             IconButton(
@@ -354,7 +354,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Press O to open a newspaper PDF.',
+                        'Press O or Ctrl+O to open a newspaper PDF.\nUse + / - to Zoom, 0 to Reset, and ← / → to turn pages.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: Colors.white54),
                       ),
