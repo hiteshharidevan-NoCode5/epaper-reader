@@ -9,9 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  pdfx: 2.6.0
-  app_links: 6.1.1
-  uri_content: 2.2.0
+  pdfx: ^2.6.0
+  app_links: ^6.1.1
+  file_picker: ^6.1.1
 
 dev_dependencies:
   flutter_test:
