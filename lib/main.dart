@@ -199,15 +199,51 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     }
   }
 
+  Future<void> _openFileBytes(Uint8List bytes, String title) async {
+    try {
+      _pdfController?.dispose();
+      final controller = PdfControllerPinch(
+        document: PdfDocument.openData(bytes),
+        initialPage: 1,
+      );
+
+      final doc = await controller.document;
+
+      if (!mounted) return;
+      setState(() {
+        _documentTitle = title;
+        _pageCount = doc.pagesCount;
+        _currentPage = 1;
+        _pdfController = controller;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load PDF from data: $e')),
+      );
+    }
+  }
+
   Future<void> _pickLocalFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
+        withData: true,
       );
-      if (result != null && result.files.single.path != null) {
-        final path = result.files.single.path!;
-        await _openFilePath(path, result.files.single.name);
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.single;
+
+      if (file.path != null && file.path!.isNotEmpty) {
+        await _openFilePath(file.path!, file.name);
+      } else if (file.bytes != null) {
+        await _openFileBytes(file.bytes!, file.name);
+      } else {
+        throw Exception("File data could not be retrieved.");
       }
     } catch (e) {
       if (!mounted) return;
