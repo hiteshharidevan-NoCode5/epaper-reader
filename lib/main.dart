@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfx/pdfx.dart';
@@ -75,7 +76,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         HardwareKeyboard.instance.isMetaPressed ||
         HardwareKeyboard.instance.isAltPressed;
 
-    // --- ZOOM IN (+, =, or Ctrl + =) ---
     if (key == LogicalKeyboardKey.equal ||
         key == LogicalKeyboardKey.add ||
         key == LogicalKeyboardKey.numpadAdd) {
@@ -83,21 +83,18 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       return true;
     }
 
-    // --- ZOOM OUT (-, or Ctrl + -) ---
     if (key == LogicalKeyboardKey.minus ||
         key == LogicalKeyboardKey.numpadSubtract) {
       _zoomBy(0.77);
       return true;
     }
 
-    // --- RESET ZOOM (0) ---
     if (key == LogicalKeyboardKey.digit0 ||
         key == LogicalKeyboardKey.numpad0) {
       _zoomReset();
       return true;
     }
 
-    // --- TURN PAGES (Left/Right, PageUp/PageDown, [ / ]) ---
     if (key == LogicalKeyboardKey.arrowRight ||
         key == LogicalKeyboardKey.pageDown ||
         key == LogicalKeyboardKey.bracketRight) {
@@ -110,13 +107,11 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       return true;
     }
 
-    // --- OPEN FILE (Ctrl+O or 'O') ---
     if ((isCtrl && key == LogicalKeyboardKey.keyO) || key == LogicalKeyboardKey.keyO) {
       _pickLocalFile();
       return true;
     }
 
-    // --- CLOSE DOCUMENT (Ctrl+W, Esc, 'Q', or 'X') ---
     if ((isCtrl && key == LogicalKeyboardKey.keyW) ||
         key == LogicalKeyboardKey.escape ||
         key == LogicalKeyboardKey.keyQ ||
@@ -137,46 +132,54 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         onTimeout: () => null,
       );
       if (initialUri != null) {
-        _handleUri(initialUri);
+        _handleIncomingUri(initialUri);
       }
     } catch (_) {}
 
     _linkSubscription = _appLinks.uriLinkStream.listen(
-      (uri) => _handleUri(uri),
+      (uri) => _handleIncomingUri(uri),
       onError: (_) {},
     );
   }
 
-  Future<void> _handleUri(Uri uri) async {
+  Future<void> _handleIncomingUri(Uri uri) async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
 
     try {
-      String path = uri.toFilePath();
-      await _openFilePath(path, uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'ePaper Edition');
-    } catch (_) {
-      try {
-        final filePath = uri.path;
-        if (filePath.isNotEmpty && File(filePath).existsSync()) {
-          await _openFilePath(filePath, 'ePaper Edition');
-        } else {
-          throw Exception('Unable to read direct URI');
+      String title = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'ePaper Edition';
+
+      if (uri.scheme == 'file') {
+        final file = File(uri.toFilePath());
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          await _loadPdfData(bytes, title);
+          return;
         }
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open document from link. Please use Ctrl+O to select.')),
-        );
       }
+
+      // If passed as raw string path
+      if (File(uri.path).existsSync()) {
+        final bytes = await File(uri.path).readAsBytes();
+        await _loadPdfData(bytes, title);
+        return;
+      }
+
+      throw Exception('Direct stream unavailable');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open file directly. Press O to pick from Files.')),
+      );
     }
   }
 
-  Future<void> _openFilePath(String path, String title) async {
+  Future<void> _loadPdfData(Uint8List bytes, String title) async {
     try {
       _pdfController?.dispose();
       final controller = PdfControllerPinch(
-        document: PdfDocument.openFile(path),
+        document: PdfDocument.openData(bytes),
         initialPage: 1,
       );
 
@@ -199,51 +202,20 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     }
   }
 
-  Future<void> _openFileBytes(Uint8List bytes, String title) async {
-    try {
-      _pdfController?.dispose();
-      final controller = PdfControllerPinch(
-        document: PdfDocument.openData(bytes),
-        initialPage: 1,
-      );
-
-      final doc = await controller.document;
-
-      if (!mounted) return;
-      setState(() {
-        _documentTitle = title;
-        _pageCount = doc.pagesCount;
-        _currentPage = 1;
-        _pdfController = controller;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load PDF from data: $e')),
-      );
-    }
-  }
-
   Future<void> _pickLocalFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
-        withData: true,
+        withData: true, // Loads bytes directly across ChromeOS container boundary
       );
 
-      if (result == null || result.files.isEmpty) return;
-
-      final file = result.files.single;
-
-      if (file.path != null && file.path!.isNotEmpty) {
-        await _openFilePath(file.path!, file.name);
-      } else if (file.bytes != null) {
-        await _openFileBytes(file.bytes!, file.name);
-      } else {
-        throw Exception("File data could not be retrieved.");
+      if (result != null && result.files.single.bytes != null) {
+        await _loadPdfData(result.files.single.bytes!, result.files.single.name);
+      } else if (result != null && result.files.single.path != null) {
+        final file = File(result.files.single.path!);
+        final bytes = await file.readAsBytes();
+        await _loadPdfData(bytes, result.files.single.name);
       }
     } catch (e) {
       if (!mounted) return;
@@ -340,7 +312,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
             IconButton(
               tooltip: 'Zoom In (+)',
               icon: const Icon(Icons.add_circle_outline_rounded),
-              onPressed: () => _zoomBy(1.3),
+              onPressed: _zoomBy(1.3),
             ),
             const SizedBox(width: 8),
             IconButton(
@@ -390,7 +362,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Press O or Ctrl+O to open a newspaper PDF.\nUse + / - to Zoom, 0 to Reset, and ← / → to turn pages.',
+                        'Press O or click below to open any downloaded newspaper.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: Colors.white54),
                       ),
@@ -400,7 +372,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                           backgroundColor: const Color(0xFF6B1D1D),
                         ),
                         icon: const Icon(Icons.folder_open_rounded),
-                        label: const Text('Open ePaper (O)'),
+                        label: const Text('Open ePaper from Files (O)'),
                         onPressed: _pickLocalFile,
                       ),
                     ],
