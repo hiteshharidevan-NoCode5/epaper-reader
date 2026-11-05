@@ -312,7 +312,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
             IconButton(
               tooltip: 'Zoom In (+)',
               icon: const Icon(Icons.add_circle_outline_rounded),
-              onPressed: _zoomBy(1.3),
+              onPressed: () => _zoomBy(1.3),
             ),
             const SizedBox(width: 8),
             IconButton(
