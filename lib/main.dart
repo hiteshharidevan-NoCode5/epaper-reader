@@ -45,13 +45,14 @@ class ReaderHomeScreen extends StatefulWidget {
 class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   static const _intentChannel = MethodChannel('epaper_reader/intent');
 
-  PdfControllerPinch? _pdfController;
+  PdfController? _pdfController;
   final GlobalKey _captureKey = GlobalKey();
 
   String _documentTitle = 'NuzEPpr';
   int _pageCount = 0;
   int _currentPage = 1;
   bool _isLoading = false;
+  int _viewerKey = 0;
 
   @override
   void initState() {
@@ -73,9 +74,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         final map = Map<String, dynamic>.from(call.arguments as Map);
         final bytes = map['bytes'] as Uint8List?;
         final title = map['title'] as String? ?? 'NuzEPpr';
-        if (bytes != null) {
-          await _loadPdfData(bytes, title);
-        }
+        if (bytes != null) await _loadPdfData(bytes, title);
       }
     });
 
@@ -85,64 +84,41 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         final map = Map<String, dynamic>.from(result);
         final bytes = map['bytes'] as Uint8List?;
         final title = map['title'] as String? ?? 'NuzEPpr';
-        if (bytes != null) {
-          await _loadPdfData(bytes, title);
-        }
+        if (bytes != null) await _loadPdfData(bytes, title);
       }
     } catch (_) {}
   }
 
   bool _onHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
-
     final key = event.logicalKey;
-    final isCtrl = HardwareKeyboard.instance.isControlPressed ||
-        HardwareKeyboard.instance.isMetaPressed ||
-        HardwareKeyboard.instance.isAltPressed;
 
     if (key == LogicalKeyboardKey.keyS && _pdfController != null) {
       _takeScreenshot();
       return true;
     }
-
-    if (key == LogicalKeyboardKey.equal ||
-        key == LogicalKeyboardKey.add ||
-        key == LogicalKeyboardKey.numpadAdd) {
-      _zoomBy(1.3);
+    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
+      _resetPageFit();
       return true;
     }
-
-    if (key == LogicalKeyboardKey.minus ||
-        key == LogicalKeyboardKey.numpadSubtract) {
-      _zoomBy(0.77);
-      return true;
-    }
-
-    if (key == LogicalKeyboardKey.digit0 ||
-        key == LogicalKeyboardKey.numpad0) {
-      _zoomReset();
-      return true;
-    }
-
     if (key == LogicalKeyboardKey.arrowRight ||
         key == LogicalKeyboardKey.pageDown ||
-        key == LogicalKeyboardKey.bracketRight) {
+        key == LogicalKeyboardKey.bracketRight ||
+        key == LogicalKeyboardKey.space) {
       _nextPage();
       return true;
-    } else if (key == LogicalKeyboardKey.arrowLeft ||
+    }
+    if (key == LogicalKeyboardKey.arrowLeft ||
         key == LogicalKeyboardKey.pageUp ||
         key == LogicalKeyboardKey.bracketLeft) {
       _prevPage();
       return true;
     }
-
-    if ((isCtrl && key == LogicalKeyboardKey.keyO) || key == LogicalKeyboardKey.keyO) {
+    if (key == LogicalKeyboardKey.keyO) {
       _pickLocalFile();
       return true;
     }
-
-    if ((isCtrl && key == LogicalKeyboardKey.keyW) ||
-        key == LogicalKeyboardKey.escape ||
+    if (key == LogicalKeyboardKey.escape ||
         key == LogicalKeyboardKey.keyQ ||
         key == LogicalKeyboardKey.keyX) {
       if (_pdfController != null) {
@@ -150,14 +126,13 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         return true;
       }
     }
-
     return false;
   }
 
   Future<void> _takeScreenshot() async {
     if (_pdfController == null) return;
     try {
-      final RenderRepaintBoundary? boundary =
+      final boundary =
           _captureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return;
 
@@ -165,7 +140,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return;
 
-      final Uint8List pngBytes = byteData.buffer.asUint8List();
+      final pngBytes = byteData.buffer.asUint8List();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final fileName = 'ePaper_p${_currentPage}_$timestamp.png';
 
@@ -196,11 +171,10 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     setState(() => _isLoading = true);
     try {
       _pdfController?.dispose();
-      final controller = PdfControllerPinch(
+      final controller = PdfController(
         document: PdfDocument.openData(bytes),
         initialPage: 1,
       );
-
       final doc = await controller.document;
 
       if (!mounted) return;
@@ -210,6 +184,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         _currentPage = 1;
         _pdfController = controller;
         _isLoading = false;
+        _viewerKey++;
       });
     } catch (e) {
       if (!mounted) return;
@@ -256,7 +231,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   void _nextPage() {
     if (_pdfController != null && _currentPage < _pageCount) {
       _pdfController!.nextPage(
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
     }
@@ -265,67 +240,15 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   void _prevPage() {
     if (_pdfController != null && _currentPage > 1) {
       _pdfController!.previousPage(
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
     }
   }
 
-  bool get _isZoomedIn {
-    if (_pdfController == null) return false;
-    try {
-      final fit = _pdfController!.calculatePageFitMatrix(pageNumber: _currentPage);
-      final curScale = _pdfController!.value.getMaxScaleOnAxis();
-      final fitScale = fit?.getMaxScaleOnAxis() ?? 1.0;
-      return curScale > (fitScale * 1.08);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  void _handleHorizontalSwipe(DragEndDetails details) {
-    if (_isZoomedIn) return;
-    final vx = details.primaryVelocity ?? 0;
-    if (vx < -250) {
-      _nextPage();
-    } else if (vx > 250) {
-      _prevPage();
-    }
-  }
-
-  void _zoomBy(double factor) {
+  void _resetPageFit() {
     if (_pdfController == null) return;
-    try {
-      final Size screenSize = MediaQuery.of(context).size;
-      final Offset center = Offset(screenSize.width / 2, screenSize.height / 2);
-
-      final Matrix4 current = _pdfController!.value;
-      final Matrix4 translationToCenter = Matrix4.translationValues(-center.dx, -center.dy, 0);
-      final Matrix4 scaleMatrix = Matrix4.diagonal3Values(factor, factor, 1.0);
-      final Matrix4 translationBack = Matrix4.translationValues(center.dx, center.dy, 0);
-
-      final Matrix4 newMatrix = translationBack * scaleMatrix * translationToCenter * current;
-
-      _pdfController!.goTo(
-        destination: newMatrix,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    } catch (_) {}
-  }
-
-  void _zoomReset() {
-    if (_pdfController == null) return;
-    try {
-      final matrix = _pdfController!.calculatePageFitMatrix(pageNumber: _currentPage);
-      if (matrix != null) {
-        _pdfController!.goTo(
-          destination: matrix,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    } catch (_) {}
+    setState(() => _viewerKey++);
   }
 
   @override
@@ -340,27 +263,19 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         actions: [
           if (_pdfController != null) ...[
             IconButton(
+              focusNode: FocusNode(canRequestFocus: false),
               tooltip: 'Screenshot View (S)',
               icon: const Icon(Icons.camera_alt_outlined),
               onPressed: _takeScreenshot,
             ),
             IconButton(
-              tooltip: 'Zoom Out (-)',
-              icon: const Icon(Icons.remove_circle_outline_rounded),
-              onPressed: () => _zoomBy(0.77),
-            ),
-            IconButton(
-              tooltip: 'Reset Fit (0)',
+              focusNode: FocusNode(canRequestFocus: false),
+              tooltip: 'Fit Page to Screen (0)',
               icon: const Icon(Icons.fit_screen_rounded),
-              onPressed: _zoomReset,
+              onPressed: _resetPageFit,
             ),
             IconButton(
-              tooltip: 'Zoom In (+)',
-              icon: const Icon(Icons.add_circle_outline_rounded),
-              onPressed: () => _zoomBy(1.3),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
+              focusNode: FocusNode(canRequestFocus: false),
               tooltip: 'Previous Page (←)',
               icon: const Icon(Icons.chevron_left_rounded),
               onPressed: _currentPage > 1 ? _prevPage : null,
@@ -375,17 +290,20 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
               ),
             ),
             IconButton(
+              focusNode: FocusNode(canRequestFocus: false),
               tooltip: 'Next Page (→)',
               icon: const Icon(Icons.chevron_right_rounded),
               onPressed: _currentPage < _pageCount ? _nextPage : null,
             ),
             IconButton(
+              focusNode: FocusNode(canRequestFocus: false),
               tooltip: 'Close (Esc / Q)',
               icon: const Icon(Icons.close_rounded),
               onPressed: _closeDocument,
             ),
           ],
           IconButton(
+            focusNode: FocusNode(canRequestFocus: false),
             tooltip: 'Open PDF (O)',
             icon: const Icon(Icons.folder_open_rounded),
             onPressed: _pickLocalFile,
@@ -423,30 +341,27 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                     ],
                   ),
                 )
-              : Focus(
-                  autofocus: true,
-                  onKeyEvent: (node, event) {
-                    if (event is KeyDownEvent) {
-                      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                        _nextPage();
-                        return KeyEventResult.handled;
-                      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                        _prevPage();
-                        return KeyEventResult.handled;
-                      }
-                    }
-                    return KeyEventResult.ignored;
-                  },
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onHorizontalDragEnd: _handleHorizontalSwipe,
-                    child: RepaintBoundary(
-                      key: _captureKey,
-                      child: PdfViewPinch(
-                        controller: _pdfController!,
-                        onPageChanged: (page) {
-                          setState(() => _currentPage = page);
-                        },
+              : RepaintBoundary(
+                  key: _captureKey,
+                  child: PdfView(
+                    key: ValueKey('pdf_view_$_viewerKey'),
+                    controller: _pdfController!,
+                    scrollDirection: Axis.horizontal,
+                    pageSnapping: true,
+                    onDocumentLoaded: (doc) {
+                      setState(() => _pageCount = doc.pagesCount);
+                    },
+                    onPageChanged: (page) {
+                      setState(() => _currentPage = page);
+                    },
+                    builders: PdfViewBuilders<DefaultBuilderOptions>(
+                      options: const DefaultBuilderOptions(),
+                      documentLoaderBuilder: (_) =>
+                          const Center(child: CircularProgressIndicator()),
+                      pageLoaderBuilder: (_) =>
+                          const Center(child: CircularProgressIndicator()),
+                      errorBuilder: (_, error) => Center(
+                        child: Text('Error rendering page: $error'),
                       ),
                     ),
                   ),
