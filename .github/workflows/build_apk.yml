@@ -37,8 +37,15 @@ jobs:
       - run: flutter create . --org com.example --project-name epaper_reader
       - name: Generate Icons
         run: |
-          printf "flutter_launcher_icons:\n  android: true\n  image_path: 'assets/icon.png'\n  adaptive_icon_background: '#141414'\n  adaptive_icon_foreground: 'assets/icon.png'\n" > flutter_launcher_icons.yaml
-          flutter pub get && flutter pub get && dart run flutter_launcher_icons
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          python3 -c '
+          from PIL import Image
+          im = Image.open("assets/icon.png")
+          for d, sz in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
+              out = f"android/app/src/main/res/mipmap-{d}/ic_launcher.png"
+              im.resize((sz, sz), Image.LANCZOS).save(out)
+          '
+          ls -lh android/app/src/main/res/mipmap-*/ic_launcher.png
       - name: Configure Android
         run: |
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
