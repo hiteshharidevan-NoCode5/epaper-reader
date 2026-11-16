@@ -271,6 +271,28 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     }
   }
 
+  bool get _isZoomedIn {
+    if (_pdfController == null) return false;
+    try {
+      final fit = _pdfController!.calculatePageFitMatrix(pageNumber: _currentPage);
+      final curScale = _pdfController!.value.getMaxScaleOnAxis();
+      final fitScale = fit?.getMaxScaleOnAxis() ?? 1.0;
+      return curScale > (fitScale * 1.08);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _handleHorizontalSwipe(DragEndDetails details) {
+    if (_isZoomedIn) return;
+    final vx = details.primaryVelocity ?? 0;
+    if (vx < -250) {
+      _nextPage();
+    } else if (vx > 250) {
+      _prevPage();
+    }
+  }
+
   void _zoomBy(double factor) {
     if (_pdfController == null) return;
     try {
@@ -401,13 +423,32 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                     ],
                   ),
                 )
-              : RepaintBoundary(
-                  key: _captureKey,
-                  child: PdfViewPinch(
-                    controller: _pdfController!,
-                    onPageChanged: (page) {
-                      setState(() => _currentPage = page);
-                    },
+              : Focus(
+                  autofocus: true,
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent) {
+                      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                        _nextPage();
+                        return KeyEventResult.handled;
+                      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                        _prevPage();
+                        return KeyEventResult.handled;
+                      }
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragEnd: _handleHorizontalSwipe,
+                    child: RepaintBoundary(
+                      key: _captureKey,
+                      child: PdfViewPinch(
+                        controller: _pdfController!,
+                        onPageChanged: (page) {
+                          setState(() => _currentPage = page);
+                        },
+                      ),
+                    ),
                   ),
                 ),
     );
