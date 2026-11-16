@@ -104,12 +104,14 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Build and Rename APK
+        run: |
+          flutter build apk --release
+          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/epaper-reader.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: epaper-reader-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: epaper-reader
+          path: build/app/outputs/flutter-apk/epaper-reader.apk
           retention-days: 1
