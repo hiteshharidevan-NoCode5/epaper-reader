@@ -19,7 +19,7 @@ class LightweightEPaperApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ePaper Reader',
+      title: 'NuzEPpr',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -48,7 +48,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   PdfControllerPinch? _pdfController;
   final GlobalKey _captureKey = GlobalKey();
 
-  String _documentTitle = 'ePaper Edition';
+  String _documentTitle = 'NuzEPpr';
   int _pageCount = 0;
   int _currentPage = 1;
   bool _isLoading = false;
@@ -72,7 +72,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       if (call.method == 'onNewPdf' && call.arguments is Map) {
         final map = Map<String, dynamic>.from(call.arguments as Map);
         final bytes = map['bytes'] as Uint8List?;
-        final title = map['title'] as String? ?? 'ePaper Edition';
+        final title = map['title'] as String? ?? 'NuzEPpr';
         if (bytes != null) {
           await _loadPdfData(bytes, title);
         }
@@ -84,7 +84,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       if (result is Map) {
         final map = Map<String, dynamic>.from(result);
         final bytes = map['bytes'] as Uint8List?;
-        final title = map['title'] as String? ?? 'ePaper Edition';
+        final title = map['title'] as String? ?? 'NuzEPpr';
         if (bytes != null) {
           await _loadPdfData(bytes, title);
         }
@@ -247,7 +247,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     _pdfController?.dispose();
     setState(() {
       _pdfController = null;
-      _documentTitle = 'ePaper Edition';
+      _documentTitle = 'NuzEPpr';
       _pageCount = 0;
       _currentPage = 1;
     });
@@ -311,7 +311,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _pdfController != null ? _documentTitle : 'ePaper Reader',
+          _pdfController != null ? _documentTitle : 'NuzEPpr',
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           overflow: TextOverflow.ellipsis,
         ),
@@ -380,7 +380,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                       const Icon(Icons.newspaper_rounded, size: 84, color: Colors.white24),
                       const SizedBox(height: 16),
                       const Text(
-                        'ePaper Reader',
+                        'NuzEPpr',
                         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                       const SizedBox(height: 8),

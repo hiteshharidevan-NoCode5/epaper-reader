@@ -26,12 +26,13 @@ jobs:
       - name: Flutter Create Platform Files
         run: flutter create . --org com.example --project-name epaper_reader
 
-      - name: Configure Android Project
+      - name: Configure Android Project & App Name
         run: |
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
           sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
+          sed -i 's/android:label="[^"]*"/android:label="NuzEPpr"/' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>' android/app/src/main/AndroidManifest.xml
 
       - name: Add PDF Intent Filter
@@ -104,7 +105,7 @@ jobs:
                   return try {
                       val stream = contentResolver.openInputStream(uri) ?: return null
                       val bytes = stream.use { it.readBytes() }
-                      var title = "ePaper Edition"
+                      var title = "NuzEPpr"
                       contentResolver.query(uri, null, null, null, null)?.use { c ->
                           val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                           if (idx != -1 && c.moveToFirst()) {
@@ -125,11 +126,11 @@ jobs:
       - name: Build and Rename APK
         run: |
           flutter build apk --release
-          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/epaper-reader.apk
+          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/NuzEPpr.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: epaper-reader
-          path: build/app/outputs/flutter-apk/epaper-reader.apk
+          name: NuzEPpr
+          path: build/app/outputs/flutter-apk/NuzEPpr.apk
           retention-days: 1
