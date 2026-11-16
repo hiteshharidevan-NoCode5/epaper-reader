@@ -39,22 +39,6 @@ jobs:
         run: |
           rm -rf android/app/src/main/res/mipmap-anydpi-v26
           python3 -c '
-          from PIL import Image
-          im = Image.open("assets/icon.png")
-          for d, sz in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
-              out = f"android/app/src/main/res/mipmap-{d}/ic_launcher.png"
-              im.resize((sz, sz), Image.LANCZOS).save(out)
-          '
-          ls -lh android/app/src/main/res/mipmap-*/ic_launcher.png
-      - name: Configure Android
-        run: |
-          sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
-          sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
-          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
-          sed -i 's/android:label="[^"]*"/android:label="NuzEPpr"/' android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>' android/app/src/main/AndroidManifest.xml
-          python3 -c '
           p = "android/app/src/main/AndroidManifest.xml"
           f = '<intent-filter><action android:name="android.intent.action.VIEW"/><action android:name="android.intent.action.EDIT"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="content" android:mimeType="application/pdf"/><data android:scheme="file" android:mimeType="application/pdf"/><data android:host="*" android:mimeType="application/pdf"/><data android:pathPattern=".*\\.pdf"/></intent-filter></activity>'
           open(p, "w").write(open(p).read().replace("</activity>", f, 1))
