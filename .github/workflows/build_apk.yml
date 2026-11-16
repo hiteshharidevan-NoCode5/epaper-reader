@@ -22,6 +22,13 @@ jobs:
       - run: |
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/' android/app/build.gradle
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' android/app/build.gradle
+          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 35/' android/app/build.gradle
+          sed -i 's/targetSdkVersion = flutter.targetSdkVersion/targetSdkVersion = 35/' android/app/build.gradle
+          sed -i 's/com.android.tools.build:gradle:7.3.0/com.android.tools.build:gradle:8.3.2/' android/build.gradle
+          sed -i 's/id "com.android.application" version "7.3.0"/id "com.android.application" version "8.3.2"/' android/settings.gradle
+          sed -i 's/gradle-7.6.3-all.zip/gradle-8.4-all.zip/' android/gradle/wrapper/gradle-wrapper.properties
           sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
           cp .github/scripts/MainActivity.kt android/app/src/main/kotlin/com/example/epaper_reader/MainActivity.kt

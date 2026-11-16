@@ -24,7 +24,7 @@ for d, sz in [("mdpi",48), ("hdpi",72), ("xhdpi",96), ("xxhdpi",144), ("xxxhdpi"
 p = "android/app/src/main/AndroidManifest.xml"
 s = open(p).read()
 s = s.replace('android:label="epaper_reader"', 'android:label="NuzEPpr"')
-s = s.replace('<application', '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>\n    <application', 1)
+s = s.replace('<application', '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>\n    <application', 1)
 flt = (
     '<intent-filter>'
     '<action android:name="android.intent.action.VIEW"/>'
