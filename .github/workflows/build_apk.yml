@@ -26,18 +26,34 @@ jobs:
       - name: Flutter Create Platform Files
         run: flutter create . --org com.example --project-name epaper_reader
 
-      - name: Configure Android Project & Native Content Resolver
+      - name: Configure Android Project
         run: |
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
           sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
-
           sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>' android/app/src/main/AndroidManifest.xml
 
-          INTENT_FILTER='<intent-filter><action android:name="android.intent.action.VIEW"\/><action android:name="android.intent.action.EDIT"\/><category android:name="android.intent.category.DEFAULT"\/><category android:name="android.intent.category.BROWSABLE"\/><data android:scheme="content" android:mimeType="application\/pdf"\/><data android:scheme="file" android:mimeType="application\/pdf"\/><data android:host="*" android:mimeType="application\/pdf"\/><data android:pathPattern=".*\\.pdf"\/><\/intent-filter>'
-          sed -i "s/<\/activity>/$INTENT_FILTER<\/activity>/" android/app/src/main/AndroidManifest.xml
+      - name: Add PDF Intent Filter
+        run: |
+          python3 -c '
+          p = "android/app/src/main/AndroidManifest.xml"
+          s = open(p).read()
+          f = """<intent-filter>
+            <action android:name="android.intent.action.VIEW"/>
+            <action android:name="android.intent.action.EDIT"/>
+            <category android:name="android.intent.category.DEFAULT"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:scheme="content" android:mimeType="application/pdf"/>
+            <data android:scheme="file" android:mimeType="application/pdf"/>
+            <data android:host="*" android:mimeType="application/pdf"/>
+            <data android:pathPattern=".*\\\\.pdf"/>
+          </intent-filter></activity>"""
+          open(p, "w").write(s.replace("</activity>", f, 1))
+          '
 
+      - name: Add Native Content Resolver
+        run: |
           cat << 'KOTLIN' > android/app/src/main/kotlin/com/example/epaper_reader/MainActivity.kt
           package com.example.epaper_reader
 
@@ -61,36 +77,38 @@ jobs:
               override fun onNewIntent(intent: Intent) {
                   super.onNewIntent(intent)
                   setIntent(intent)
-                  flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
-                      val data = extractPdfFromIntent(intent)
+                  flutterEngine?.dartExecutor?.binaryMessenger?.let { m ->
+                      val data = extractPdf(intent)
                       if (data != null) {
-                          MethodChannel(messenger, CHANNEL).invokeMethod("onNewPdf", data)
+                          MethodChannel(m, CHANNEL).invokeMethod("onNewPdf", data)
                       }
                   }
               }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                  val messenger = flutterEngine.dartExecutor.binaryMessenger
+                  MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, res ->
                       if (call.method == "getInitialPdf") {
-                          val data = pendingIntent?.let { extractPdfFromIntent(it) }
+                          val data = pendingIntent?.let { extractPdf(it) }
                           pendingIntent = null
-                          result.success(data)
+                          res.success(data)
                       } else {
-                          result.notImplemented()
+                          res.notImplemented()
                       }
                   }
               }
 
-              private fun extractPdfFromIntent(intent: Intent): Map<String, Any>? {
+              private fun extractPdf(intent: Intent): Map<String, Any>? {
                   val uri: Uri = intent.data ?: return null
                   return try {
-                      val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+                      val stream = contentResolver.openInputStream(uri) ?: return null
+                      val bytes = stream.use { it.readBytes() }
                       var title = "ePaper Edition"
-                      contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                          val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                          if (nameIndex != -1 && cursor.moveToFirst()) {
-                              title = cursor.getString(nameIndex) ?: title
+                      contentResolver.query(uri, null, null, null, null)?.use { c ->
+                          val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                          if (idx != -1 && c.moveToFirst()) {
+                              title = c.getString(idx) ?: title
                           }
                       }
                       mapOf("bytes" to bytes, "title" to title)
