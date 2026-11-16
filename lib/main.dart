@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfx/pdfx.dart';
-import 'package:app_links/app_links.dart';
 import 'package:file_picker/file_picker.dart';
 
 void main() {
@@ -44,9 +43,9 @@ class ReaderHomeScreen extends StatefulWidget {
 }
 
 class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
+  static const _intentChannel = MethodChannel('epaper_reader/intent');
+
   PdfControllerPinch? _pdfController;
-  final _appLinks = AppLinks();
-  StreamSubscription<Uri>? _linkSubscription;
   final GlobalKey _captureKey = GlobalKey();
 
   String _documentTitle = 'ePaper Edition';
@@ -58,17 +57,39 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onHardwareKey);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initIncomingLinks();
-    });
+    _setupNativeIntentListener();
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
-    _linkSubscription?.cancel();
     _pdfController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _setupNativeIntentListener() async {
+    _intentChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onNewPdf' && call.arguments is Map) {
+        final map = Map<String, dynamic>.from(call.arguments as Map);
+        final bytes = map['bytes'] as Uint8List?;
+        final title = map['title'] as String? ?? 'ePaper Edition';
+        if (bytes != null) {
+          await _loadPdfData(bytes, title);
+        }
+      }
+    });
+
+    try {
+      final result = await _intentChannel.invokeMethod('getInitialPdf');
+      if (result is Map) {
+        final map = Map<String, dynamic>.from(result);
+        final bytes = map['bytes'] as Uint8List?;
+        final title = map['title'] as String? ?? 'ePaper Edition';
+        if (bytes != null) {
+          await _loadPdfData(bytes, title);
+        }
+      }
+    } catch (_) {}
   }
 
   bool _onHardwareKey(KeyEvent event) {
@@ -171,56 +192,8 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     }
   }
 
-  Future<void> _initIncomingLinks() async {
-    try {
-      final initialUri = await _appLinks.getInitialLink().timeout(
-        const Duration(seconds: 2),
-        onTimeout: () => null,
-      );
-      if (initialUri != null) {
-        _handleIncomingUri(initialUri);
-      }
-    } catch (_) {}
-
-    _linkSubscription = _appLinks.uriLinkStream.listen(
-      (uri) => _handleIncomingUri(uri),
-      onError: (_) {},
-    );
-  }
-
-  Future<void> _handleIncomingUri(Uri uri) async {
-    if (_isLoading) return;
-    setState(() => _isLoading = true);
-
-    try {
-      String title = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'ePaper Edition';
-
-      if (uri.scheme == 'file') {
-        final file = File(uri.toFilePath());
-        if (await file.exists()) {
-          final bytes = await file.readAsBytes();
-          await _loadPdfData(bytes, title);
-          return;
-        }
-      }
-
-      if (File(uri.path).existsSync()) {
-        final bytes = await File(uri.path).readAsBytes();
-        await _loadPdfData(bytes, title);
-        return;
-      }
-
-      throw Exception('Direct stream unavailable');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open file directly. Press O to pick from Files.')),
-      );
-    }
-  }
-
   Future<void> _loadPdfData(Uint8List bytes, String title) async {
+    setState(() => _isLoading = true);
     try {
       _pdfController?.dispose();
       final controller = PdfControllerPinch(

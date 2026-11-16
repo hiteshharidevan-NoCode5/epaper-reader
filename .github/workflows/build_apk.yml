@@ -26,7 +26,7 @@ jobs:
       - name: Flutter Create Platform Files
         run: flutter create . --org com.example --project-name epaper_reader
 
-      - name: Configure Android Project (SDK & Kotlin & PDF Handler)
+      - name: Configure Android Project & Native Content Resolver
         run: |
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
@@ -37,6 +37,69 @@ jobs:
 
           INTENT_FILTER='<intent-filter><action android:name="android.intent.action.VIEW"\/><action android:name="android.intent.action.EDIT"\/><category android:name="android.intent.category.DEFAULT"\/><category android:name="android.intent.category.BROWSABLE"\/><data android:scheme="content" android:mimeType="application\/pdf"\/><data android:scheme="file" android:mimeType="application\/pdf"\/><data android:host="*" android:mimeType="application\/pdf"\/><data android:pathPattern=".*\\.pdf"\/><\/intent-filter>'
           sed -i "s/<\/activity>/$INTENT_FILTER<\/activity>/" android/app/src/main/AndroidManifest.xml
+
+          cat << 'KOTLIN' > android/app/src/main/kotlin/com/example/epaper_reader/MainActivity.kt
+          package com.example.epaper_reader
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import android.provider.OpenableColumns
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+
+          class MainActivity: FlutterActivity() {
+              private val CHANNEL = "epaper_reader/intent"
+              private var pendingIntent: Intent? = null
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  pendingIntent = intent
+              }
+
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  setIntent(intent)
+                  flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                      val data = extractPdfFromIntent(intent)
+                      if (data != null) {
+                          MethodChannel(messenger, CHANNEL).invokeMethod("onNewPdf", data)
+                      }
+                  }
+              }
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                      if (call.method == "getInitialPdf") {
+                          val data = pendingIntent?.let { extractPdfFromIntent(it) }
+                          pendingIntent = null
+                          result.success(data)
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+              }
+
+              private fun extractPdfFromIntent(intent: Intent): Map<String, Any>? {
+                  val uri: Uri = intent.data ?: return null
+                  return try {
+                      val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+                      var title = "ePaper Edition"
+                      contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                          val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                          if (nameIndex != -1 && cursor.moveToFirst()) {
+                              title = cursor.getString(nameIndex) ?: title
+                          }
+                      }
+                      mapOf("bytes" to bytes, "title" to title)
+                  } catch (e: Exception) {
+                      null
+                  }
+              }
+          }
+          KOTLIN
 
       - name: Get Dependencies
         run: flutter pub get
