@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:app_links/app_links.dart';
@@ -45,6 +47,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   PdfControllerPinch? _pdfController;
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _linkSubscription;
+  final GlobalKey _captureKey = GlobalKey();
 
   String _documentTitle = 'ePaper Edition';
   int _pageCount = 0;
@@ -75,6 +78,11 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed ||
         HardwareKeyboard.instance.isAltPressed;
+
+    if (key == LogicalKeyboardKey.keyS && _pdfController != null) {
+      _takeScreenshot();
+      return true;
+    }
 
     if (key == LogicalKeyboardKey.equal ||
         key == LogicalKeyboardKey.add ||
@@ -125,6 +133,44 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     return false;
   }
 
+  Future<void> _takeScreenshot() async {
+    if (_pdfController == null) return;
+    try {
+      final RenderRepaintBoundary? boundary =
+          _captureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return;
+
+      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+
+      final Uint8List pngBytes = byteData.buffer.asUint8List();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'ePaper_p${_currentPage}_$timestamp.png';
+
+      final downloadDir = Directory('/storage/emulated/0/Download');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+
+      final file = File('${downloadDir.path}/$fileName');
+      await file.writeAsBytes(pngBytes);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved screenshot: $fileName in Downloads'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Screenshot failed: $e')),
+      );
+    }
+  }
+
   Future<void> _initIncomingLinks() async {
     try {
       final initialUri = await _appLinks.getInitialLink().timeout(
@@ -158,7 +204,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         }
       }
 
-      // If passed as raw string path
       if (File(uri.path).existsSync()) {
         final bytes = await File(uri.path).readAsBytes();
         await _loadPdfData(bytes, title);
@@ -207,7 +252,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
-        withData: true, // Loads bytes directly across ChromeOS container boundary
+        withData: true,
       );
 
       if (result != null && result.files.single.bytes != null) {
@@ -300,6 +345,11 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
         actions: [
           if (_pdfController != null) ...[
             IconButton(
+              tooltip: 'Screenshot View (S)',
+              icon: const Icon(Icons.camera_alt_outlined),
+              onPressed: _takeScreenshot,
+            ),
+            IconButton(
               tooltip: 'Zoom Out (-)',
               icon: const Icon(Icons.remove_circle_outline_rounded),
               onPressed: () => _zoomBy(0.77),
@@ -378,11 +428,14 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                     ],
                   ),
                 )
-              : PdfViewPinch(
-                  controller: _pdfController!,
-                  onPageChanged: (page) {
-                    setState(() => _currentPage = page);
-                  },
+              : RepaintBoundary(
+                  key: _captureKey,
+                  child: PdfViewPinch(
+                    controller: _pdfController!,
+                    onPageChanged: (page) {
+                      setState(() => _currentPage = page);
+                    },
+                  ),
                 ),
     );
   }

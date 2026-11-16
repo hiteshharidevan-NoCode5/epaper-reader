@@ -33,6 +33,8 @@ jobs:
           sed -i "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.9.22'/" android/build.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
 
+          sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>' android/app/src/main/AndroidManifest.xml
+
           INTENT_FILTER='<intent-filter><action android:name="android.intent.action.VIEW"\/><action android:name="android.intent.action.EDIT"\/><category android:name="android.intent.category.DEFAULT"\/><category android:name="android.intent.category.BROWSABLE"\/><data android:scheme="content" android:mimeType="application\/pdf"\/><data android:scheme="file" android:mimeType="application\/pdf"\/><data android:host="*" android:mimeType="application\/pdf"\/><data android:pathPattern=".*\\.pdf"\/><\/intent-filter>'
           sed -i "s/<\/activity>/$INTENT_FILTER<\/activity>/" android/app/src/main/AndroidManifest.xml
 
