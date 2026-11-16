@@ -248,6 +248,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
 
   void _resetPageFit() {
     if (_pdfController == null) return;
+    _pdfController!.initialPage = _currentPage;
     setState(() => _viewerKey++);
   }
 
