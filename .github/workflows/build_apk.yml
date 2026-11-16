@@ -37,9 +37,8 @@ jobs:
       - run: flutter create . --org com.example --project-name epaper_reader
       - name: Generate Icons
         run: |
-          flutter pub add --dev flutter_launcher_icons
           printf "flutter_launcher_icons:\n  android: true\n  image_path: 'assets/icon.png'\n  adaptive_icon_background: '#141414'\n  adaptive_icon_foreground: 'assets/icon.png'\n" > flutter_launcher_icons.yaml
-          dart run flutter_launcher_icons
+          flutter pub get && dart run flutter_launcher_icons
       - name: Configure Android
         run: |
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle

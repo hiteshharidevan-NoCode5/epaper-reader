@@ -1,22 +1,21 @@
 name: epaper_reader
-description: "Ultra-lightweight ePaper PDF Reader"
-publish_to: "none"
+description: Lightweight ePaper PDF reader
+publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.0.0 <4.0.0"
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
   pdfx: ^2.6.0
-  app_links: ^6.1.1
-  file_picker: ^6.1.1
+  file_picker: ^8.0.0+1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
