@@ -1,32 +1,46 @@
 name: Build Android APK
-
 on:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.6'
           channel: 'stable'
-
-      - name: Flutter Create Platform Files
-        run: flutter create . --org com.example --project-name epaper_reader
-
-      - name: Configure Android Project & App Name
+      - name: Clean Icon Background
+        run: |
+          pip install pillow
+          python3 -c '
+          from PIL import Image
+          img = Image.open("assets/icon_raw.jpg").convert("RGBA")
+          w, h = img.size
+          px = img.load()
+          vis = set()
+          st = [(0,0),(w-1,0),(0,h-1),(w-1,h-1),(int(w*0.44),int(h*0.34))]
+          while st:
+              x, y = st.pop()
+              if (x,y) in vis or not (0<=x<w and 0<=y<h): continue
+              vis.add((x,y))
+              r, g, b, a = px[x,y]
+              if abs(r-g)<18 and abs(g-b)<18 and r>140:
+                  px[x,y] = (0,0,0,0)
+                  st.extend([(x+1,y),(x-1,y),(x,y+1),(x,y-1)])
+          img.save("assets/icon.png")
+          '
+      - run: flutter create . --org com.example --project-name epaper_reader
+      - name: Generate Icons
+        run: |
+          flutter pub add --dev flutter_launcher_icons
+          printf "flutter_launcher_icons:\n  android: true\n  image_path: 'assets/icon.png'\n  adaptive_icon_background: '#141414'\n  adaptive_icon_foreground: 'assets/icon.png'\n" > flutter_launcher_icons.yaml
+          dart run flutter_launcher_icons
+      - name: Configure Android
         run: |
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
@@ -34,30 +48,15 @@ jobs:
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
           sed -i 's/android:label="[^"]*"/android:label="NuzEPpr"/' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>' android/app/src/main/AndroidManifest.xml
-
-      - name: Add PDF Intent Filter
-        run: |
           python3 -c '
           p = "android/app/src/main/AndroidManifest.xml"
-          s = open(p).read()
-          f = """<intent-filter>
-            <action android:name="android.intent.action.VIEW"/>
-            <action android:name="android.intent.action.EDIT"/>
-            <category android:name="android.intent.category.DEFAULT"/>
-            <category android:name="android.intent.category.BROWSABLE"/>
-            <data android:scheme="content" android:mimeType="application/pdf"/>
-            <data android:scheme="file" android:mimeType="application/pdf"/>
-            <data android:host="*" android:mimeType="application/pdf"/>
-            <data android:pathPattern=".*\\\\.pdf"/>
-          </intent-filter></activity>"""
-          open(p, "w").write(s.replace("</activity>", f, 1))
+          f = "<intent-filter><action android:name=\"android.intent.action.VIEW\"/><action android:name=\"android.intent.action.EDIT\"/><category android:name=\"android.intent.category.DEFAULT\"/><category android:name=\"android.intent.category.BROWSABLE\"/><data android:scheme=\"content\" android:mimeType=\"application/pdf\"/><data android:scheme=\"file\" android:mimeType=\"application/pdf\"/><data android:host=\"*\" android:mimeType=\"application/pdf\"/><data android:pathPattern=\".*\\\\.pdf\"/></intent-filter></activity>"
+          open(p, "w").write(open(p).read().replace("</activity>", f, 1))
           '
-
       - name: Add Native Content Resolver
         run: |
-          cat << 'KOTLIN' > android/app/src/main/kotlin/com/example/epaper_reader/MainActivity.kt
+          cat << 'KT' > android/app/src/main/kotlin/com/example/epaper_reader/MainActivity.kt
           package com.example.epaper_reader
-
           import android.content.Intent
           import android.net.Uri
           import android.os.Bundle
@@ -65,71 +64,42 @@ jobs:
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
-
           class MainActivity: FlutterActivity() {
-              private val CHANNEL = "epaper_reader/intent"
-              private var pendingIntent: Intent? = null
-
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  pendingIntent = intent
-              }
-
-              override fun onNewIntent(intent: Intent) {
-                  super.onNewIntent(intent)
-                  setIntent(intent)
+              private val CH = "epaper_reader/intent"
+              private var pending: Intent? = null
+              override fun onCreate(s: Bundle?) { super.onCreate(s); pending = intent }
+              override fun onNewIntent(i: Intent) {
+                  super.onNewIntent(i); setIntent(i)
                   flutterEngine?.dartExecutor?.binaryMessenger?.let { m ->
-                      val data = extractPdf(intent)
-                      if (data != null) {
-                          MethodChannel(m, CHANNEL).invokeMethod("onNewPdf", data)
-                      }
+                      extract(i)?.let { MethodChannel(m, CH).invokeMethod("onNewPdf", it) }
                   }
               }
-
-              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                  super.configureFlutterEngine(flutterEngine)
-                  val messenger = flutterEngine.dartExecutor.binaryMessenger
-                  MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, res ->
-                      if (call.method == "getInitialPdf") {
-                          val data = pendingIntent?.let { extractPdf(it) }
-                          pendingIntent = null
-                          res.success(data)
-                      } else {
-                          res.notImplemented()
-                      }
+              override fun configureFlutterEngine(fe: FlutterEngine) {
+                  super.configureFlutterEngine(fe)
+                  MethodChannel(fe.dartExecutor.binaryMessenger, CH).setMethodCallHandler { c, r ->
+                      if (c.method == "getInitialPdf") { r.success(pending?.let { extract(it) }); pending = null }
+                      else r.notImplemented()
                   }
               }
-
-              private fun extractPdf(intent: Intent): Map<String, Any>? {
-                  val uri: Uri = intent.data ?: return null
+              private fun extract(i: Intent): Map<String, Any>? {
+                  val u: Uri = i.data ?: return null
                   return try {
-                      val stream = contentResolver.openInputStream(uri) ?: return null
-                      val bytes = stream.use { it.readBytes() }
-                      var title = "NuzEPpr"
-                      contentResolver.query(uri, null, null, null, null)?.use { c ->
+                      val b = contentResolver.openInputStream(u)?.use { it.readBytes() } ?: return null
+                      var t = "NuzEPpr"
+                      contentResolver.query(u, null, null, null, null)?.use { c ->
                           val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                          if (idx != -1 && c.moveToFirst()) {
-                              title = c.getString(idx) ?: title
-                          }
+                          if (idx != -1 && c.moveToFirst()) t = c.getString(idx) ?: t
                       }
-                      mapOf("bytes" to bytes, "title" to title)
-                  } catch (e: Exception) {
-                      null
-                  }
+                      mapOf("bytes" to b, "title" to t)
+                  } catch (e: Exception) { null }
               }
           }
-          KOTLIN
-
-      - name: Get Dependencies
-        run: flutter pub get
-
-      - name: Build and Rename APK
-        run: |
+          KT
+      - run: flutter pub get
+      - run: |
           flutter build apk --release
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/NuzEPpr.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: NuzEPpr
           path: build/app/outputs/flutter-apk/NuzEPpr.apk
