@@ -45,28 +45,48 @@ class ReaderHomeScreen extends StatefulWidget {
 class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   static const _intentChannel = MethodChannel('epaper_reader/intent');
 
-  PdfControllerPinch? _pdfController;
+  PdfController? _pdfController;
   Uint8List? _pdfBytes;
   final GlobalKey _captureKey = GlobalKey();
+  final TransformationController _transformController = TransformationController();
 
   String _documentTitle = 'NuzEPpr';
   int _pageCount = 0;
   int _currentPage = 1;
   bool _isLoading = false;
+  bool _isZoomed = false;
   int _viewerKey = 0;
 
   @override
   void initState() {
     super.initState();
+    _transformController.addListener(_onTransformChanged);
     HardwareKeyboard.instance.addHandler(_onHardwareKey);
     _setupNativeIntentListener();
   }
 
   @override
   void dispose() {
+    _transformController.removeListener(_onTransformChanged);
+    _transformController.dispose();
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     _pdfController?.dispose();
     super.dispose();
+  }
+
+  void _onTransformChanged() {
+    final zoomed = _transformController.value.getMaxScaleOnAxis() > 1.02;
+    if (zoomed != _isZoomed) {
+      setState(() => _isZoomed = zoomed);
+    }
+  }
+
+  void _toggleDoubleTapZoom() {
+    if (_isZoomed) {
+      _transformController.value = Matrix4.identity();
+    } else {
+      _transformController.value = Matrix4.identity()..scale(2.8);
+    }
   }
 
   Future<void> _setupNativeIntentListener() async {
@@ -171,8 +191,9 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   Future<void> _loadPdfData(Uint8List bytes, String title) async {
     setState(() => _isLoading = true);
     try {
+      _transformController.value = Matrix4.identity();
       _pdfController?.dispose();
-      final controller = PdfControllerPinch(
+      final controller = PdfController(
         document: PdfDocument.openData(bytes),
         initialPage: 1,
       );
@@ -221,6 +242,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   }
 
   void _closeDocument() {
+    _transformController.value = Matrix4.identity();
     _pdfController?.dispose();
     setState(() {
       _pdfController = null;
@@ -233,6 +255,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
 
   void _nextPage() {
     if (_pdfController != null && _currentPage < _pageCount) {
+      _transformController.value = Matrix4.identity();
       _pdfController!.nextPage(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
@@ -242,6 +265,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
 
   void _prevPage() {
     if (_pdfController != null && _currentPage > 1) {
+      _transformController.value = Matrix4.identity();
       _pdfController!.previousPage(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
@@ -251,9 +275,10 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
 
   void _resetPageFit() {
     if (_pdfController == null || _pdfBytes == null) return;
+    _transformController.value = Matrix4.identity();
     final targetPage = _currentPage;
     _pdfController?.dispose();
-    final fresh = PdfControllerPinch(
+    final fresh = PdfController(
       document: PdfDocument.openData(_pdfBytes!),
       initialPage: targetPage,
     );
@@ -356,23 +381,37 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                 )
               : RepaintBoundary(
                   key: _captureKey,
-                  child: PdfViewPinch(
-                    key: ValueKey('pdf_view_$_viewerKey'),
-                    controller: _pdfController!,
-                    onDocumentLoaded: (doc) {
-                      setState(() => _pageCount = doc.pagesCount);
-                    },
-                    onPageChanged: (page) {
-                      setState(() => _currentPage = page);
-                    },
-                    builders: PdfViewPinchBuilders<DefaultBuilderOptions>(
-                      options: const DefaultBuilderOptions(),
-                      documentLoaderBuilder: (_) =>
-                          const Center(child: CircularProgressIndicator()),
-                      pageLoaderBuilder: (_) =>
-                          const Center(child: CircularProgressIndicator()),
-                      errorBuilder: (_, error) => Center(
-                        child: Text('Error rendering page: $error'),
+                  child: GestureDetector(
+                    onDoubleTap: _toggleDoubleTapZoom,
+                    child: InteractiveViewer(
+                      transformationController: _transformController,
+                      minScale: 1.0,
+                      maxScale: 10.0,
+                      panEnabled: _isZoomed,
+                      child: PdfView(
+                        key: ValueKey('pdf_view_$_viewerKey'),
+                        controller: _pdfController!,
+                        scrollDirection: Axis.horizontal,
+                        pageSnapping: true,
+                        physics: _isZoomed
+                            ? const NeverScrollableScrollPhysics()
+                            : const PageScrollPhysics(),
+                        onDocumentLoaded: (doc) {
+                          setState(() => _pageCount = doc.pagesCount);
+                        },
+                        onPageChanged: (page) {
+                          setState(() => _currentPage = page);
+                        },
+                        builders: PdfViewBuilders<DefaultBuilderOptions>(
+                          options: const DefaultBuilderOptions(),
+                          documentLoaderBuilder: (_) =>
+                              const Center(child: CircularProgressIndicator()),
+                          pageLoaderBuilder: (_) =>
+                              const Center(child: CircularProgressIndicator()),
+                          errorBuilder: (_, error) => Center(
+                            child: Text('Error rendering page: $error'),
+                          ),
+                        ),
                       ),
                     ),
                   ),
