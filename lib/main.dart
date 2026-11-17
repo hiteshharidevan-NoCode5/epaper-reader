@@ -45,7 +45,7 @@ class ReaderHomeScreen extends StatefulWidget {
 class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   static const _intentChannel = MethodChannel('epaper_reader/intent');
 
-  PdfController? _pdfController;
+  PdfControllerPinch? _pdfController;
   Uint8List? _pdfBytes;
   final GlobalKey _captureKey = GlobalKey();
 
@@ -172,7 +172,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     setState(() => _isLoading = true);
     try {
       _pdfController?.dispose();
-      final controller = PdfController(
+      final controller = PdfControllerPinch(
         document: PdfDocument.openData(bytes),
         initialPage: 1,
       );
@@ -253,7 +253,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     if (_pdfController == null || _pdfBytes == null) return;
     final targetPage = _currentPage;
     _pdfController?.dispose();
-    final fresh = PdfController(
+    final fresh = PdfControllerPinch(
       document: PdfDocument.openData(_pdfBytes!),
       initialPage: targetPage,
     );
@@ -356,18 +356,18 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                 )
               : RepaintBoundary(
                   key: _captureKey,
-                  child: PdfView(
+                  child: PdfViewPinch(
                     key: ValueKey('pdf_view_$_viewerKey'),
                     controller: _pdfController!,
-                    scrollDirection: Axis.horizontal,
-                    pageSnapping: true,
+                    minScale: 0.5,
+                    maxScale: 12.0,
                     onDocumentLoaded: (doc) {
                       setState(() => _pageCount = doc.pagesCount);
                     },
                     onPageChanged: (page) {
                       setState(() => _currentPage = page);
                     },
-                    builders: PdfViewBuilders<DefaultBuilderOptions>(
+                    builders: PdfViewPinchBuilders<DefaultBuilderOptions>(
                       options: const DefaultBuilderOptions(),
                       documentLoaderBuilder: (_) =>
                           const Center(child: CircularProgressIndicator()),
