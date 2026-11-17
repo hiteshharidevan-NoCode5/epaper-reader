@@ -46,6 +46,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   static const _intentChannel = MethodChannel('epaper_reader/intent');
 
   PdfController? _pdfController;
+  Uint8List? _pdfBytes;
   final GlobalKey _captureKey = GlobalKey();
 
   String _documentTitle = 'NuzEPpr';
@@ -179,6 +180,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
 
       if (!mounted) return;
       setState(() {
+        _pdfBytes = bytes;
         _documentTitle = title;
         _pageCount = doc.pagesCount;
         _currentPage = 1;
@@ -222,6 +224,7 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
     _pdfController?.dispose();
     setState(() {
       _pdfController = null;
+      _pdfBytes = null;
       _documentTitle = 'NuzEPpr';
       _pageCount = 0;
       _currentPage = 1;
@@ -247,9 +250,18 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
   }
 
   void _resetPageFit() {
-    if (_pdfController == null) return;
-    _pdfController!.initialPage = _currentPage;
-    setState(() => _viewerKey++);
+    if (_pdfController == null || _pdfBytes == null) return;
+    final targetPage = _currentPage;
+    _pdfController?.dispose();
+    final fresh = PdfController(
+      document: PdfDocument.openData(_pdfBytes!),
+      initialPage: targetPage,
+    );
+    setState(() {
+      _pdfController = fresh;
+      _currentPage = targetPage;
+      _viewerKey++;
+    });
   }
 
   @override
