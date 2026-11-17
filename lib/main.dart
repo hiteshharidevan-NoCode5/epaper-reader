@@ -359,7 +359,6 @@ class _ReaderHomeScreenState extends State<ReaderHomeScreen> {
                   child: PdfViewPinch(
                     key: ValueKey('pdf_view_$_viewerKey'),
                     controller: _pdfController!,
-                    maxScale: 12.0,
                     onDocumentLoaded: (doc) {
                       setState(() => _pageCount = doc.pagesCount);
                     },
