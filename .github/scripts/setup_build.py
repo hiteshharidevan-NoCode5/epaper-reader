@@ -92,8 +92,8 @@ flt = (
     '<category android:name="android.intent.category.BROWSABLE"/>'
     '<data android:scheme="content" android:mimeType="application/pdf"/>'
     '<data android:scheme="file" android:mimeType="application/pdf"/>'
-    '<data android:host="*" android:mimeType="application/pdf"/>'
-    '<data android:pathPattern=".*\\.pdf"/>'
+    ''
+    ''
     '</intent-filter></activity>'
 )
 open(p, "w").write(s.replace("</activity>", flt, 1))
